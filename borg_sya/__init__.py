@@ -269,7 +269,7 @@ def do_check(options, conffile, gen_opts):
         logging.info('-- Done checking %s.' % task)
 
 
-if __name__ == '__main__':
+def main():
     usage = "usage: %prog [options]"
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
@@ -314,5 +314,8 @@ if __name__ == '__main__':
 
     logging.shutdown()
 
+
+if __name__ == '__main__':
+    main()
 
 # vim: ts=4 sw=4 expandtab
