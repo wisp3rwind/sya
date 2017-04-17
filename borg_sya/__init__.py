@@ -189,6 +189,9 @@ def process_task(options, conffile, task, gen_opts):
         backup_args.append('--remote-path')
         backup_args.append(conf['remote-path'])
 
+    if 'compression' in conf:
+        backup_args.extend(['--compression', conf['compression']])
+
     # Loading source paths
     includes = []
     if 'paths' in conf:
