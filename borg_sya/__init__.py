@@ -74,7 +74,7 @@ class ProcessLock(object):
 def run(path, args=None, env=None, dryrun=False):
     if dryrun:
         logging.info("$ %s %s" % (path, ' '.join(args or []), ))
-        print("$ %s %s" % (path, ' '.join(args or []), ))
+        # print("$ %s %s" % (path, ' '.join(args or []), ))
     else:
         cmdline = [path]
         if args is not None: 
