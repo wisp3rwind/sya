@@ -152,8 +152,12 @@ def process_task(options, conffile, task, gen_opts):
         logging.error("'paths' is mandatory in configuration file %s" % task)
         return
 
-    backup_args.append(conf['repository'] +
-                       '::{hostname}-{now:%Y-%m-%d_%H:%M:%S}')
+    try:
+        prefix = conf['prefix']
+    except KeyError:
+        prefix = '{hostname}'
+    backup_args.append('{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}'.format(
+        repo=conf['repository'], prefix=prefix))
 
     if 'remote-path' in conf:
         backup_args.append('--remote-path')
@@ -205,7 +209,7 @@ def process_task(options, conffile, task, gen_opts):
                 if keep in conf:
                     backup_cleanup_args.append('--' + keep)
                     backup_cleanup_args.append(conf[keep])
-            backup_cleanup_args.append('--prefix={hostname}-')
+            backup_cleanup_args.append('--prefix={}-'.format(prefix))
             backup_cleanup_args.append(conf['repository'])
             try:
                 borg('prune', backup_cleanup_args, conf['passphrase'],
