@@ -44,14 +44,15 @@ def which(command):
 BINARY = which('borg')
 
 
-class LockInUse(Exception): pass
+class LockInUse(Exception):
+    pass
 
 
 class ProcessLock(object):
-
-    # This class comes from this very elegant way of having a pid lock in order
-    # to prevent multiple instances from running on the same host.
-    # http://stackoverflow.com/a/7758075
+    """This class comes from this very elegant way of having a pid lock in
+    order to prevent multiple instances from running on the same host.
+    http://stackoverflow.com/a/7758075
+    """
 
     def __init__(self, process_name):
         self.pname = process_name
@@ -74,10 +75,11 @@ def run(path, args=None, env=None, dryrun=False):
     if dryrun:
         logging.info("$ %s %s" % (path, ' '.join(args or []), ))
         print("$ %s %s" % (path, ' '.join(args or []), ))
-        return
-    cmdline = [path]
-    if args is not None: cmdline.extend(args)
-    subprocess.check_call(cmdline, env=env)
+    else:
+        cmdline = [path]
+        if args is not None: 
+            cmdline.extend(args)
+        subprocess.check_call(cmdline, env=env)
 
 
 def run_or_exit(path, args=None, env=None, dryrun=False):
@@ -91,7 +93,8 @@ def isexec(path):
     return os.path.isfile(path) and os.access(path, os.X_OK)
 
 
-class BackupError(Exception): pass
+class BackupError(Exception):
+    pass
 
 
 def borg(command, args, passphrase=None, dryrun=False):
@@ -136,20 +139,10 @@ def process_task(options, conffile, task, gen_opts):
     if options.progress:
         backup_args.append('--progress')
 
-    env = None
-
     # Check if we want to run this backup task
     if not conf.getboolean('run_this'):
-        logging.debug("! Task disabled. 'run_this' must be set to 'yes' in %s"\
+        logging.debug("! Task disabled. 'run_this' must be set to 'yes' in %s"
                       % task)
-        return
-
-    # Loading source paths
-    paths = None
-    if 'paths' in conf:
-        paths = map(str.strip, conf['paths'].strip().split(','))
-    elif 'include_file' not in conf:
-        logging.error("'paths' is mandatory in configuration file %s" % task)
         return
 
     try:
@@ -163,32 +156,37 @@ def process_task(options, conffile, task, gen_opts):
         backup_args.append('--remote-path')
         backup_args.append(conf['remote-path'])
 
+    # Loading source paths
+    includes = []
+    if 'paths' in conf:
+        includes.extend(conf['paths'].strip().split(','))
+    elif 'include_file' not in conf:
+        logging.error("'paths' is mandatory in configuration file %s" % task)
+        return
+
     # include and exclude patterns
-    includes = [p for p in paths] if paths is not None else []
     excludes = []
     if 'include_file' in conf:
         with open(os.path.join(options.confdir, conf['include_file'])) as f:
             for line in f.readlines():
                 if line.startswith('- '):
-                    excludes.append(line[2:].strip())
+                    excludes.append(line[2:])
                 else:
-                    includes.append(line.strip())
+                    includes.append(line)
 
     if 'exclude_file' in conf:
         with open(os.path.join(options.confdir, conf['exclude_file'])) as f:
-            for line in f.readlines():
-                excludes.append(line.strip())
+            excludes.extend(f.readlines())
 
     for exclude in excludes:
-        backup_args.append('--exclude')
-        backup_args.append(exclude)
-    for include in includes:
-        backup_args.append(include)
+        backup_args.extend(['--exclude', exclude.strip()])
+    backup_args.extend(i.strip() for i in includes)
 
     # Load and execute if applicable pre-task commands
     if 'pre' in conf.keys() and isexec(conf['pre']):
         try:
-            run(os.path.join(options.confdir, conf['pre']), None, dryrun=options.dryrun)
+            run(os.path.join(options.confdir, conf['pre']),
+                None, dryrun=options.dryrun)
         except subprocess.CalledProcessError as e:
             logging.error(e)
             return
@@ -199,24 +197,23 @@ def process_task(options, conffile, task, gen_opts):
     except BackupError:
         logging.error("'%s' backup failed. You should investigate." % task)
     else:
-        if 'keep-daily' in conf or 'keep-weekly' in conf\
-        or 'keep-monthly' in conf:
+        # prune old backups
+        if any(k in conf for k in ('keep-daily', 'keep-weekly', 'keep-monthly')):
             backup_cleanup_args = list(gen_opts)
             if conffile['sya'].getboolean('verbose'):
                 backup_cleanup_args.append('--list')
                 backup_cleanup_args.append('--stats')
-            for keep in ('keep-daily', 'keep-weekly', 'keep-monthly', ):
+            for keep in ('keep-daily', 'keep-weekly', 'keep-monthly'):
                 if keep in conf:
-                    backup_cleanup_args.append('--' + keep)
-                    backup_cleanup_args.append(conf[keep])
+                    backup_cleanup_args.extend(['--' + keep, conf[keep]])
             backup_cleanup_args.append('--prefix={}-'.format(prefix))
             backup_cleanup_args.append(conf['repository'])
             try:
                 borg('prune', backup_cleanup_args, conf['passphrase'],
                      options.dryrun)
             except BackupError:
-                logging.error("'%s' old files cleanup failed. You should investigate."\
-                            % conf['name'])
+                logging.error("'%s' old files cleanup failed. You should "
+                              "investigate." % conf['name'])
 
     # Load and execute if applicable post-task commands
     if 'post' in conf.keys() and isexec(conf['post']):
@@ -233,7 +230,8 @@ def do_backup(options, conffile, gen_args):
     try:
         lock.acquire()
     except LockInUse:
-        logging.error('Another instance seems to be running on the same conf dir.')
+        logging.error('Another instance seems to be running '
+                      'on the same conf dir.')
         sys.exit(1)
 
     # Run global 'pre' script if it exists
@@ -244,7 +242,8 @@ def do_backup(options, conffile, gen_args):
 
     # Task loop
     for task in conffile.sections():
-        if task == 'sya': continue
+        if task == 'sya':
+            continue
         logging.info('-- Backing up using %s configuration...' % task)
         process_task(options, conffile, task, gen_args)
         logging.info('-- Done backing up %s.' % task)
@@ -259,10 +258,11 @@ def do_backup(options, conffile, gen_args):
 
 
 def do_check(options, conffile, gen_opts):
-    for task in conffile.sections() :
-        if task == 'sya': continue
+    for task in conffile.sections():
+        if task == 'sya':
+            continue
         logging.info('-- Checking using %s configuration...' % task)
-        backup_args = list(gen_opts)    
+        backup_args = list(gen_opts)
         backup_args.append(conffile[task]['repository'])
         try:
             borg('check', backup_args, conffile[task]['passphrase'],
@@ -277,19 +277,20 @@ def main():
     usage = "usage: %prog [options]"
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
-                      help='Be verbose and print stats.')
+                      help="Be verbose and print stats.")
     parser.add_option('-p', '--progress', action='store_true', dest='progress',
-                      help='Show progress.')
+                      help="Show progress.")
     parser.add_option('-c', '--check', action='store_true', dest='check',
-                      help='Perform a repository check for consistency.')
+                      help="Perform a repository check for consistency.")
     parser.add_option('-d', '--config-dir', action='store',
                       type='string', dest='confdir', default=DEFAULT_CONFDIR,
-                      help='Configuration directory, default is %s.' % DEFAULT_CONFDIR)
+                      help="Configuration directory, default is %s."
+                           "" % DEFAULT_CONFDIR)
     parser.add_option('-t', '--task', action='store',
                       type='string', dest='task', default='*',
-                      help='Task to run, default is all.')
+                      help="Task to run, default is all.")
     parser.add_option('-n', '--dry-run', action='store_true', dest='dryrun',
-                      help='Do not run backup, don\'t act.')
+                      help="Do not run backup, don't act.")
     (options, args) = parser.parse_args()
 
     gen_args = []
