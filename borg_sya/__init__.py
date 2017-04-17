@@ -27,7 +27,7 @@ import socket
 import configparser
 
 
-DEFAULT_CONFDIR = '/etc/sya'
+DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config'
 GLOBAL_PRESCRIPT_NAME = 'pre.sh'
 GLOBAL_POSTSCRIPT_NAME = 'post.sh'
