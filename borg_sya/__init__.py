@@ -128,7 +128,8 @@ def parse_conf(confdir, conf):
 
     return conf
 
-
+KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
+              'keep-yearly')
 def process_task(options, conffile, task, gen_opts):
     conf = conffile[task]
     backup_args = list(gen_opts)
@@ -198,12 +199,12 @@ def process_task(options, conffile, task, gen_opts):
         logging.error("'%s' backup failed. You should investigate." % task)
     else:
         # prune old backups
-        if any(k in conf for k in ('keep-daily', 'keep-weekly', 'keep-monthly')):
+        if any(k in conf for k in KEEP_FLAGS):
             backup_cleanup_args = list(gen_opts)
             if conffile['sya'].getboolean('verbose'):
                 backup_cleanup_args.append('--list')
                 backup_cleanup_args.append('--stats')
-            for keep in ('keep-daily', 'keep-weekly', 'keep-monthly'):
+            for keep in KEEP_FLAGS:
                 if keep in conf:
                     backup_cleanup_args.extend(['--' + keep, conf[keep]])
             backup_cleanup_args.append('--prefix={}-'.format(prefix))
