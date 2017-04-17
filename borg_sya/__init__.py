@@ -88,6 +88,15 @@ def run_or_exit(path, args=None, env=None, dryrun=False):
     except subprocess.CalledProcessError as e:
         sys.exit(e)
 
+def run_extra_cmd(name, conf, dryrun):
+    if name in conf.keys() and isexec(conf[name]):
+        try:
+            run(os.path.join(options.confdir, conf[name]), None,
+                dryrun=dryrun)
+        except subprocess.CalledProcessError as e:
+            logging.error(e)
+            raise BackupError()
+
 
 def isexec(path):
     return os.path.isfile(path) and os.access(path, os.X_OK)
@@ -184,13 +193,12 @@ def process_task(options, conffile, task, gen_opts):
     backup_args.extend(i.strip() for i in includes)
 
     # Load and execute if applicable pre-task commands
-    if 'pre' in conf.keys() and isexec(conf['pre']):
-        try:
-            run(os.path.join(options.confdir, conf['pre']),
-                None, dryrun=options.dryrun)
-        except subprocess.CalledProcessError as e:
-            logging.error(e)
-            return
+    try:
+        run_extra_cmd('pre', conf, options.dryrun)
+    except BackupError:
+        logging.error("'%s' pre-backup script failed. "
+                      "You should investigate." % task)
+        return
 
     # run the backup
     try:
@@ -217,13 +225,12 @@ def process_task(options, conffile, task, gen_opts):
                               "investigate." % conf['name'])
 
     # Load and execute if applicable post-task commands
-    if 'post' in conf.keys() and isexec(conf['post']):
-        try:
-            run(os.path.join(options.confdir, conf['post']), None,
-                dryrun=options.dryrun)
-        except subprocess.CalledProcessError as e:
-            logging.error(e)
-            return
+    try:
+        run_extra_cmd('post', conf, options.dryrun)
+    except BackupError:
+        logging.error("'%s' post-backup script failed. "
+                      "You should investigate." % task)
+        return
 
 
 def do_backup(options, conffile, gen_args):
