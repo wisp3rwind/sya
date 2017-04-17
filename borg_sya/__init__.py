@@ -20,17 +20,17 @@
 
 import sys
 import os
+from contextlib import contextmanager
 import logging
 import optparse
 import subprocess
+from subprocess import CalledProcessError
 import socket
 import configparser
 
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config'
-GLOBAL_PRESCRIPT_NAME = 'pre.sh'
-GLOBAL_POSTSCRIPT_NAME = 'post.sh'
 
 
 def which(command):
@@ -77,29 +77,49 @@ def run(path, args=None, env=None, dryrun=False):
         # print("$ %s %s" % (path, ' '.join(args or []), ))
     else:
         cmdline = [path]
-        if args is not None: 
+        if args is not None:
             cmdline.extend(args)
         subprocess.check_call(cmdline, env=env)
 
 
-def run_or_exit(path, args=None, env=None, dryrun=False):
-    try:
-        run(path, args, env, dryrun)
-    except subprocess.CalledProcessError as e:
-        sys.exit(e)
+def run_extra_script(path, options, name="", args=None, env=None, dryrun=False):
+    if path:
+        if not os.path.isabs(path):
+            path = os.path.join(options.confdir, path)
+        if isexec(path):
+            try:
+                run(path, args, env, options.dryrun)
+            except CalledProcessError as e:
+                if name:
+                    logging.error("%s failed. You should investigate." % name)
+                logging.error(e)
+                raise BackupError()
 
-def run_extra_cmd(name, conf, dryrun):
-    if name in conf.keys() and isexec(conf[name]):
-        try:
-            run(os.path.join(options.confdir, conf[name]), None,
-                dryrun=dryrun)
-        except subprocess.CalledProcessError as e:
-            logging.error(e)
-            raise BackupError()
+
+@contextmanager
+def prepostscript(pre_path, pre_name, post_path, post_name, options):
+    # Exceptions from the pre- and post-scripts are intended to propagate.
+    # If this function simply didn't yield in case of an exception in the
+    # pre-script, some kind of error would occur (didn't test, but probably
+    # something akin 'generator didn't yield').
+    run_extra_script(pre_path, options, name=pre_name)
+    post_args = []
+    try:
+        yield post_args
+    finally:
+        # Maybe use an environment variable instead? 
+        # (BACKUP_STATUS=<borg returncode>)
+        run_extra_script(post_path, options, name=post_name, args=post_args)
 
 
 def isexec(path):
-    return os.path.isfile(path) and os.access(path, os.X_OK)
+    if os.path.isfile(path):
+        if os.access(path, os.X_OK):
+            return(True)
+        else:
+            logging.warn("%s exists, but cannot be executed "
+                         "by the current user." % path)
+    return(False)
 
 
 class BackupError(Exception):
@@ -115,9 +135,9 @@ def borg(command, args, passphrase=None, dryrun=False):
     args.insert(0, command)
     try:
         run(BINARY, args, env=env, dryrun=dryrun)
-    except subprocess.CalledProcessError as e:
+    except CalledProcessError as e:
         logging.error(e)
-        raise BackupError
+        raise BackupError()
 
 
 def parse_conf(confdir, conf):
@@ -137,8 +157,11 @@ def parse_conf(confdir, conf):
 
     return conf
 
+
 KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
               'keep-yearly')
+
+
 def process_task(options, conffile, task, gen_opts):
     conf = conffile[task]
     backup_args = list(gen_opts)
@@ -193,44 +216,35 @@ def process_task(options, conffile, task, gen_opts):
     backup_args.extend(i.strip() for i in includes)
 
     # Load and execute if applicable pre-task commands
-    try:
-        run_extra_cmd('pre', conf, options.dryrun)
-    except BackupError:
-        logging.error("'%s' pre-backup script failed. "
-                      "You should investigate." % task)
-        return
-
-    # run the backup
-    try:
-        borg('create', backup_args, conf['passphrase'], options.dryrun)
-    except BackupError:
-        logging.error("'%s' backup failed. You should investigate." % task)
-    else:
-        # prune old backups
-        if any(k in conf for k in KEEP_FLAGS):
-            backup_cleanup_args = list(gen_opts)
-            if conffile['sya'].getboolean('verbose'):
-                backup_cleanup_args.append('--list')
-                backup_cleanup_args.append('--stats')
-            for keep in KEEP_FLAGS:
-                if keep in conf:
-                    backup_cleanup_args.extend(['--' + keep, conf[keep]])
-            backup_cleanup_args.append('--prefix={}-'.format(prefix))
-            backup_cleanup_args.append(conf['repository'])
-            try:
-                borg('prune', backup_cleanup_args, conf['passphrase'],
-                     options.dryrun)
-            except BackupError:
-                logging.error("'%s' old files cleanup failed. You should "
-                              "investigate." % conf['name'])
-
-    # Load and execute if applicable post-task commands
-    try:
-        run_extra_cmd('post', conf, options.dryrun)
-    except BackupError:
-        logging.error("'%s' post-backup script failed. "
-                      "You should investigate." % task)
-        return
+    with prepostscript(
+            conf.get('pre', None), "'%s' pre-backup script" % task,
+            conf.get('post', None), "'%s' post-backup script" % task,
+            options) as status:
+        # run the backup
+        try:
+            borg('create', backup_args, conf['passphrase'], options.dryrun)
+        except BackupError:
+            logging.error("'%s' backup failed. You should investigate." % task)
+            status.append('1')
+        else:
+            status.append('0')
+            # prune old backups
+            if any(k in conf for k in KEEP_FLAGS):
+                backup_cleanup_args = list(gen_opts)
+                if conffile['sya'].getboolean('verbose'):
+                    backup_cleanup_args.append('--list')
+                    backup_cleanup_args.append('--stats')
+                for keep in KEEP_FLAGS:
+                    if keep in conf:
+                        backup_cleanup_args.extend(['--' + keep, conf[keep]])
+                backup_cleanup_args.append('--prefix={}-'.format(prefix))
+                backup_cleanup_args.append(conf['repository'])
+                try:
+                    borg('prune', backup_cleanup_args, conf['passphrase'],
+                         options.dryrun)
+                except BackupError:
+                    logging.error("'%s' old files cleanup failed. You should "
+                                  "investigate." % conf['name'])
 
 
 def do_backup(options, conffile, gen_args):
@@ -242,25 +256,18 @@ def do_backup(options, conffile, gen_args):
                       'on the same conf dir.')
         sys.exit(1)
 
-    # Run global 'pre' script if it exists
-    prescript_path = os.path.join(options.confdir, GLOBAL_PRESCRIPT_NAME)
-    if isexec(prescript_path):
-        logging.debug("Running global pre-script '%s'." % prescript_path)
-        run_or_exit(prescript_path, None, dryrun=options.dryrun)
-
-    # Task loop
-    for task in conffile.sections():
-        if task == 'sya':
-            continue
-        logging.info('-- Backing up using %s configuration...' % task)
-        process_task(options, conffile, task, gen_args)
-        logging.info('-- Done backing up %s.' % task)
-
-    # Run global 'post' script if it exists
-    postcript_path = os.path.join(options.confdir, GLOBAL_POSTSCRIPT_NAME)
-    if isexec(postcript_path):
-        logging.debug("Running global post-script '%s'." % postcript_path)
-        run_or_exit(postcript_path, None, dryrun=options.dryrun)
+    # Wrap in global 'pre' and 'post' scripts if they exists
+    with prepostscript(
+            conffile['sya'].get('pre', None), "Global pre script",
+            conffile['sya'].get('post', None), "Global post script",
+            options):
+        # Task loop
+        for task in conffile.sections():
+            if task == 'sya':
+                continue
+            logging.info('-- Backing up using %s configuration...' % task)
+            process_task(options, conffile, task, gen_args)
+            logging.info('-- Done backing up %s.' % task)
 
     lock.release()
 
