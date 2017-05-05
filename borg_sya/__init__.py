@@ -265,7 +265,8 @@ def do_backup(options, conffile, gen_args):
             conffile['sya'].get('post', None), "Global post script",
             options):
         # Task loop
-        for task in conffile.sections():
+        tasks = options.tasks or conffile.sections()
+        for task in tasks:
             if task == 'sya':
                 continue
             logging.info('-- Backing up using %s configuration...' % task)
@@ -276,7 +277,8 @@ def do_backup(options, conffile, gen_args):
 
 
 def do_check(options, conffile, gen_opts):
-    for task in conffile.sections():
+    tasks = options.tasks or conffile.sections()
+    for task in tasks:
         if task == 'sya':
             continue
         logging.info('-- Checking using %s configuration...' % task)
@@ -303,11 +305,10 @@ def main():
                         default=DEFAULT_CONFDIR,
                         help="Configuration directory, default is %s."
                              "" % DEFAULT_CONFDIR)
-    parser.add_argument('-t', '--task',
-                        default='*',
-                        help="Task to run, default is all.")
     parser.add_argument('-n', '--dry-run', action='store_true', dest='dryrun',
                         help="Do not run backup, don't act.")
+    parser.add_argument('tasks', nargs='*',
+                        help="Tasks to run, default is all.")
     options = parser.parse_args()
 
     gen_args = []
