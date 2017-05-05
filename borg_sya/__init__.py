@@ -22,7 +22,7 @@ import sys
 import os
 from contextlib import contextmanager
 import logging
-import optparse
+import argparse
 import subprocess
 from subprocess import CalledProcessError
 import socket
@@ -107,7 +107,7 @@ def prepostscript(pre_path, pre_name, post_path, post_name, options):
     try:
         yield post_args
     finally:
-        # Maybe use an environment variable instead? 
+        # Maybe use an environment variable instead?
         # (BACKUP_STATUS=<borg returncode>)
         run_extra_script(post_path, options, name=post_name, args=post_args)
 
@@ -292,24 +292,23 @@ def do_check(options, conffile, gen_opts):
 
 
 def main():
-    usage = "usage: %prog [options]"
-    parser = optparse.OptionParser(usage=usage)
-    parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
-                      help="Be verbose and print stats.")
-    parser.add_option('-p', '--progress', action='store_true', dest='progress',
-                      help="Show progress.")
-    parser.add_option('-c', '--check', action='store_true', dest='check',
-                      help="Perform a repository check for consistency.")
-    parser.add_option('-d', '--config-dir', action='store',
-                      type='string', dest='confdir', default=DEFAULT_CONFDIR,
-                      help="Configuration directory, default is %s."
-                           "" % DEFAULT_CONFDIR)
-    parser.add_option('-t', '--task', action='store',
-                      type='string', dest='task', default='*',
-                      help="Task to run, default is all.")
-    parser.add_option('-n', '--dry-run', action='store_true', dest='dryrun',
-                      help="Do not run backup, don't act.")
-    (options, args) = parser.parse_args()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help="Be verbose and print stats.")
+    parser.add_argument('-p', '--progress', action='store_true',
+                        help="Show progress.")
+    parser.add_argument('-c', '--check', action='store_true',
+                        help="Perform a repository check for consistency.")
+    parser.add_argument('-d', '--config-dir', dest='confdir',
+                        default=DEFAULT_CONFDIR,
+                        help="Configuration directory, default is %s."
+                             "" % DEFAULT_CONFDIR)
+    parser.add_argument('-t', '--task',
+                        default='*',
+                        help="Task to run, default is all.")
+    parser.add_argument('-n', '--dry-run', action='store_true', dest='dryrun',
+                        help="Do not run backup, don't act.")
+    options = parser.parse_args()
 
     gen_args = []
 
