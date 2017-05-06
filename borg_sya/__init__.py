@@ -294,22 +294,44 @@ def do_check(options, conffile, gen_opts):
 
 
 def main():
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help="Be verbose and print stats.")
-    parser.add_argument('-p', '--progress', action='store_true',
-                        help="Show progress.")
-    parser.add_argument('-c', '--check', action='store_true',
-                        help="Perform a repository check for consistency.")
-    parser.add_argument('-d', '--config-dir', dest='confdir',
-                        default=DEFAULT_CONFDIR,
-                        help="Configuration directory, default is %s."
-                             "" % DEFAULT_CONFDIR)
-    parser.add_argument('-n', '--dry-run', action='store_true', dest='dryrun',
-                        help="Do not run backup, don't act.")
-    parser.add_argument('tasks', nargs='*',
-                        help="Tasks to run, default is all.")
-    options = parser.parse_args()
+    p = argparse.ArgumentParser(allow_abbrev=False)
+    p.add_argument(
+        '-d', '--config-dir', dest='confdir', default=DEFAULT_CONFDIR,
+        help="Configuration directory, default is {}".format(DEFAULT_CONFDIR))
+    p.add_argument(
+        '-n', '--dry-run', action='store_true', dest='dryrun',
+        help="Do not run backup, don't act.")
+    p.add_argument(
+        '-v', '--verbose', action='store_true',
+        help="Be verbose and print stats.")
+
+    sp = p.add_subparsers()
+
+    pcreate = sp.add_parser('create', help="Do a backup run.")
+    pcreate.set_defaults(func=do_backup)
+    pcreate.add_argument(
+        '-p', '--progress', action='store_true',
+        help="Show progress.")
+    pcreate.add_argument(
+        'tasks', nargs='*',
+        help="Tasks to run, default is all.")
+
+    pcheck = sp.add_parser('check',
+                           help="Perform a check for repository consistency.")
+    pcheck.set_defaults(func=do_check)
+    pcheck.add_argument(
+        '-p', '--progress', action='store_true',
+        help="Show progress.")
+    pcheck.add_argument(
+        '-r', '--repo', action='store_true',
+        help="Directly name repositories to check instead of selecting "
+             "them from tasks.")
+    pcheck.add_argument(
+        'tasks', nargs='*',
+        help="Tasks to select repositories from, default is all. If '-r' "
+             "is given, name repositories instead of tasks.")
+
+    options = p.parse_args()
 
     gen_args = []
 
@@ -330,10 +352,7 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
         gen_args.append('-v')
 
-    if options.check:
-        do_check(options, conffile, gen_args)
-    else:
-        do_backup(options, conffile, gen_args)
+    options.func(options, conffile, gen_args)
 
     logging.shutdown()
 
