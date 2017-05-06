@@ -293,6 +293,36 @@ def do_check(options, conffile, gen_opts):
         logging.info('-- Done checking %s.' % task)
 
 
+def mount(options, conffile, gen_opts):
+    repo = None
+    prefix = None
+    if options.task:
+        repo = conffile[options.task]['repository']
+        prefix = conffile[options.task]['prefix']
+    if options.repo:
+        repo = options.repo.strip('^')
+    if options.prefix:
+        prefix = options.prefix.strip('^')
+
+    raise NotImplementedError()
+    logging.info("-- Mounting archive from repository {} with prefix {}..."
+                 "".format(repo, prefix))
+    logging.info("-- Selected archive {}".format(""))
+    borg_args = list(gen_opts)
+    borg_args.append(repo)
+    try:
+        # TODO: proper passphrase/key support. Same for do_check, verify
+        # correctness of do_backup.
+        borg('mount', borg_args, conffile[task]['passphrase'],
+             options.dryrun)
+    except BackupError:
+        logging.error("'{}:{}' mounting failed. You should investigate."
+                      "".format(repo, prefix))
+    # TODO: is this true?
+    logging.info('-- Done mounting. borg has daemonized, manually unmount '
+                 'the repo to shut down the FUSE driver.')
+
+
 def main():
     p = argparse.ArgumentParser(allow_abbrev=False)
     p.add_argument(
@@ -330,6 +360,38 @@ def main():
         'tasks', nargs='*',
         help="Tasks to select repositories from, default is all. If '-r' "
              "is given, name repositories instead of tasks.")
+
+    pmount = sp.add_parser('mount', help="Mount a snapshot.")
+    pmount.set_defaults(func=mount)
+    # --repo name[^[^ ...]] -> repo
+    # --task name[^[^ ...]] -> repo, prefix
+    # --before=2017-02-01T12:45:10
+    grselect = pmount.add_mutually_exclusive_group(required=True)
+    grselect.add_argument(
+        '-r', '--repo', default=None,
+        help="Select the last archive in the given repository, this may be "
+             "narrowed down further by specifying '--prefix'. "
+             "Optionally append an arbitrary number of '^' to choose the "
+             "next-to last or earlier archives.")
+    grselect.add_argument(
+        '-t', '--task', default=None,
+        help="Select the last archive for the task (i.e. repository "
+             "and prefix). Optionally append an arbitrary number of '^' "
+             "to choose the next-to last or earlier archives.")
+    pmount.add_argument(
+        '-p', '--prefix', default=None,
+        help="Narrow down the selection by matching the prefix.")
+    pmount.add_argument(
+        '--umask', default=None,
+        help="Set umask when mounting")
+    # TODO: --daemon choice
+    # TODO: it IS possible to mount a whole archive
+    pmount.add_argument(
+        '-f', '--foreground', action='store_true',
+        help="Whether to stay in the foreground or daemonize")
+    pmount.add_argument(
+        'mountpoint', nargs=1,
+        help="The mountpoint.")
 
     options = p.parse_args()
 
