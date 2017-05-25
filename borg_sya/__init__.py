@@ -106,9 +106,19 @@ class PrePostScript():
         self.options = options
 
         self.nesting_level = 0
+        self.lazy = False
+
+    def __call__(self, *, lazy=False):
+        self.lazy = True
+        return(self)
 
     def __enter__(self):
-        if self.nesting_level == 0:
+        if self.lazy:
+            # Only actually enter at the next invocation. This still increments
+            # the nesting_level so that cleanup will nevertheless occur at this
+            # outer level.
+            self.lazy = False
+        elif self.nesting_level == 0:
             # Exceptions from the pre- and post-scripts are intended to
             # propagate!
             if self.pre:  # don't fail if self.pre == None
@@ -216,6 +226,21 @@ class Task():
         except (KeyError, ValueError, TypeError) as e:
             raise InvalidConfigurationError(str(e))
 
+        self.lazy = False
+
+    def __call__(self, *, lazy=False):
+        self.lazy = True
+        return(self)
+
+    def __enter__(self):
+        self.repo(lazy=self.lazy).__enter__()
+        self.scripts(lazy=self.lazy).__enter__()
+        self.lazy = False
+
+    def __exit__(self, *exc):
+        self.repo.__exit__(*exc)
+        self.scripts.__exit__(*exc)
+
     def backup(self, cfg, options, gen_opts):
         # Check if we want to run this backup task
         if not self.enabled:
@@ -257,7 +282,7 @@ class Task():
         # run the backup
         try:
             # Load and execute if applicable pre-task commands
-            with self.repo, self.scripts:
+            with self:
                 borg('create', backup_args, self.repo.passphrase,
                      options.dryrun)
         except BackupError:
@@ -275,7 +300,7 @@ class Task():
             backup_cleanup_args.append(f'--prefix={prefix}-')
             backup_cleanup_args.append(f"{repo}")
             try:
-                with self.repo, self.scripts:
+                with self:
                     borg('prune', backup_cleanup_args,
                          self.repo.passphrase, options.dryrun)
             except BackupError:
@@ -331,8 +356,9 @@ def do_backup(options, cfg, gen_args):
         for task in tasks:
             task = cfg['tasks'][task]
             logging.info(f'-- Backing up using {task} configuration...')
-            task.backup(cfg, options, gen_args)
-            task.prune(cfg, options, gen_args)
+            with task(lazy=True):
+                task.backup(cfg, options, gen_args)
+                task.prune(cfg, options, gen_args)
             logging.info(f'-- Done backing up {task}.')
 
     lock.release()
