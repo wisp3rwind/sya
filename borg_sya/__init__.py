@@ -183,6 +183,26 @@ class Repository(PrePostScript):
         return(self.path)
 
 
+class Task():
+    def __init__(self, cfg, name):
+        tcfg = cfg['tasks'][name]
+
+        if 'repository' not in tcfg:
+            logging.error("'repository' is mandatory for each task in config")
+            return
+
+        self.repo = Repository(cfg, cfg['repository'])
+
+        self.scripts = PrePostScript(cfg['pre'], '', cfg['post'], '')
+
+    @property
+    def run_this(self):
+        return(self.cfg['run-this'])
+
+    def backup(self):
+        with self.repo:
+
+
 def isexec(path):
     if os.path.isfile(path):
         if os.access(path, os.X_OK):
@@ -209,17 +229,6 @@ def borg(command, args, passphrase=None, dryrun=False):
     except CalledProcessError as e:
         logging.error(e)
         raise BackupError()
-
-
-def parse_conf(confdir, cfg, name, options):
-    tcfg = cfg['tasks'][name]
-
-    # Loading target dir
-    if 'repository' not in tcfg:
-        logging.error("'repository' is mandatory for each task in config")
-        return
-
-    cfg['repositories'][repo] = Repository(cfg, cfg['repositories'][repo], options)
 
 
 KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
@@ -465,8 +474,12 @@ def main():
     with open(os.path.join(options.confdir, DEFAULT_CONFFILE), 'r') as f:
         cfg = yaml.safe_load(f)
 
+    # Parse configuration into corresponding classes.
+    for repo in cfg['repositories']:
+        cfg['repositories'][repo] = Repository(cfg, cfg['repositories'][repo],
+                                               options)
     for task in cfg['tasks']:
-        parse_conf(options.confdir, cfg['tasks'][task], options)
+        cfg['tasks'][task] = Task(cfg, cfg['tasks'][task], options)
 
     # TODO: proper validation of the config file
     if 'verbose' in cfg['sya']:
