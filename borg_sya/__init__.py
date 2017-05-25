@@ -179,6 +179,15 @@ class Repository(PrePostScript):
 
         return(args)
 
+    def check(self, options, gen_opts):
+        backup_args = list(gen_opts)
+        backup_args.append(f"{self}")
+        try:
+            borg('check', backup_args, self.passphrase, options.dryrun)
+        except BackupError:
+            logging.error(f"'{self.name}' backup check failed. You "
+                          "should investigate.")
+
     def __str__(self):
         """Used to construct the commandline arguments for borg, do not change!
         """
@@ -366,19 +375,12 @@ def do_backup(options, cfg, gen_args):
 
 def do_check(options, conffile, gen_opts):
     tasks = options.tasks or cfg['tasks']
-    # TODO: do not check repositories repeatedly
-    for task in tasks:
-        logging.info(f'-- Checking using {task} configuration...')
-        backup_args = list(gen_opts)
-        repo = cfg[task]['repository']
-        repo = cfg['repositories'][repo]
-        backup_args.append(f"{repo}")
-        try:
-            borg('check', backup_args, repo.passphrase, options.dryrun)
-        except BackupError:
-            logging.error(f"'{task}' backup check failed. You "
-                          "should investigate.")
-        logging.info(f'-- Done checking {task}.')
+    repos = set(cfg['tasks'][task].repo for task in tasks)
+
+    for repo in repos:
+        logging.info(f'-- Checking repository {repo.name}...')
+        repo.check(options, gen_opts)
+        logging.info(f'-- Done checking {repo.name}.')
 
 
 def mount(options, cfg, gen_opts):
