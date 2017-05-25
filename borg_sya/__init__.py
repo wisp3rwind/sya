@@ -27,7 +27,7 @@ import argparse
 import subprocess
 from subprocess import CalledProcessError
 import socket
-import configparser
+import yaml
 
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
@@ -154,20 +154,28 @@ def borg(command, args, passphrase=None, dryrun=False):
         raise BackupError()
 
 
-def parse_conf(confdir, conf):
+def parse_conf(confdir, cfg, name):
+    tcfg = cfg['tasks'][name]
+
     # Loading target dir
-    if 'repository' not in conf:
+    if 'repository' not in tcfg:
         logging.error("'repository' is mandatory for each task in config")
         return
 
+    parse_repo_conf(confdir, tcfg['repository'])
+
+
+def parse_repo_conf(confdir, cfg, name):
+    rcfg = cfg['repositories'][name]
+
     # check if we have a passphrase file
-    if 'passphrase_file' in conf:
-        conf['passphrase_file'] = os.path.join(confdir, conf['passphrase_file'])
-        with open(conf['passphrase_file']) as f:
-            conf['passphrase'] = f.readline().strip()
+    if 'passphrase_file' in rcfg:
+        rcfg['passphrase_file'] = os.path.join(confdir, rcfg['passphrase_file'])
+        with open(rcfg['passphrase_file']) as f:
+            rcfg['passphrase'] = f.readline().strip()
     else:
-        conf['passphrase_file'] = ''
-        conf['passphrase'] = ''
+        rcfg['passphrase_file'] = ''
+        rcfg['passphrase'] = ''
 
     return conf
 
@@ -176,56 +184,57 @@ KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
               'keep-yearly')
 
 
-def process_task(options, conffile, task, gen_opts):
-    conf = conffile[task]
+def process_task(options, cfg, name, gen_opts):
+    tcfg = cfg['tasks'][name]
+    rcfg = cfg['repositories'][tcfg['repository']]
     backup_args = list(gen_opts)
 
-    if conffile['sya'].getboolean('verbose'):
+    if cfg['sya']['verbose']:
         backup_args.append('--stats')
 
     if options.progress:
         backup_args.append('--progress')
 
     # Check if we want to run this backup task
-    if not conf.getboolean('run_this'):
+    if not cfg.get('run_this', True):
         logging.debug("! Task disabled. 'run_this' must be set to 'yes' in %s"
-                      % task)
+                      % name)
         return
 
     try:
-        prefix = conf['prefix']
+        prefix = tcfg['prefix']
     except KeyError:
         prefix = '{hostname}'
     backup_args.append('{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}'.format(
-        repo=conf['repository'], prefix=prefix))
+        repo=['path'], 
+        prefix=prefix))
 
-    if 'remote-path' in conf:
-        backup_args.append('--remote-path')
-        backup_args.append(conf['remote-path'])
+    if 'remote-path' in rcfg:
+        backup_args.extend('--remote-path', rcfg['remote-path']) 
 
-    if 'compression' in conf:
-        backup_args.extend(['--compression', conf['compression']])
+    if 'compression' in rcfg:
+        backup_args.extend(['--compression', rcfg['compression']])
 
     # Loading source paths
     includes = []
-    if 'paths' in conf:
-        includes.extend(conf['paths'].strip().split(','))
-    elif 'include_file' not in conf:
-        logging.error("'paths' is mandatory in configuration file %s" % task)
+    if 'includes' in tcfg:
+        includes.extend(tcfg['includes'])
+    elif 'include-file' not in tcfg:
+        logging.error("'paths' is mandatory in configuration file %s" % name)
         return
 
     # include and exclude patterns
     excludes = []
-    if 'include_file' in conf:
-        with open(os.path.join(options.confdir, conf['include_file'])) as f:
+    if 'include-file' in conf:
+        with open(os.path.join(options.confdir, tcfg['include_file'])) as f:
             for line in f.readlines():
                 if line.startswith('- '):
                     excludes.append(line[2:])
                 else:
                     includes.append(line)
 
-    if 'exclude_file' in conf:
-        with open(os.path.join(options.confdir, conf['exclude_file'])) as f:
+    if 'exclude-file' in conf:
+        with open(os.path.join(options.confdir, tcfg['exclude_file'])) as f:
             excludes.extend(f.readlines())
 
     for exclude in excludes:
@@ -234,37 +243,37 @@ def process_task(options, conffile, task, gen_opts):
 
     # Load and execute if applicable pre-task commands
     with PrePostScript(
-            conf.get('pre', None), "'%s' pre-backup script" % task,
-            conf.get('post', None), "'%s' post-backup script" % task,
+            tcfg.get('pre', None), "'%s' pre-backup script" % name,
+            tcfg.get('post', None), "'%s' post-backup script" % name,
             options) as status:
         # run the backup
         try:
-            borg('create', backup_args, conf['passphrase'], options.dryrun)
+            borg('create', backup_args, rcfg['passphrase'], options.dryrun)
         except BackupError:
-            logging.error("'%s' backup failed. You should investigate." % task)
+            logging.error("'%s' backup failed. You should investigate." % name)
             status.append('1')
         else:
             status.append('0')
             # prune old backups
-            if any(k in conf for k in KEEP_FLAGS):
+            if any(k in tcfg for k in KEEP_FLAGS):
                 backup_cleanup_args = list(gen_opts)
-                if conffile['sya'].getboolean('verbose'):
+                if cfg['sya']['verbose']:
                     backup_cleanup_args.append('--list')
                     backup_cleanup_args.append('--stats')
                 for keep in KEEP_FLAGS:
-                    if keep in conf:
-                        backup_cleanup_args.extend(['--' + keep, conf[keep]])
+                    if keep in tcfg:
+                        backup_cleanup_args.extend(['--' + keep, tcfg[keep]])
                 backup_cleanup_args.append('--prefix={}-'.format(prefix))
                 backup_cleanup_args.append(conf['repository'])
                 try:
-                    borg('prune', backup_cleanup_args, conf['passphrase'],
+                    borg('prune', backup_cleanup_args, rcfg['passphrase'],
                          options.dryrun)
                 except BackupError:
                     logging.error("'%s' old files cleanup failed. You should "
-                                  "investigate." % conf['name'])
+                                  "investigate." % name)
 
 
-def do_backup(options, conffile, gen_args):
+def do_backup(options, cfg, gen_args):
     lock = ProcessLock('sya' + options.confdir)
     try:
         lock.acquire()
@@ -279,44 +288,44 @@ def do_backup(options, conffile, gen_args):
             conffile['sya'].get('post', None), "Global post script",
             options):
         # Task loop
-        tasks = options.tasks or conffile.sections()
+        tasks = options.tasks or cfg['tasks']
         for task in tasks:
-            if task == 'sya':
-                continue
             logging.info('-- Backing up using %s configuration...' % task)
-            process_task(options, conffile, task, gen_args)
+            process_task(options, cfg, task, gen_args)
             logging.info('-- Done backing up %s.' % task)
 
     lock.release()
 
 
 def do_check(options, conffile, gen_opts):
-    tasks = options.tasks or conffile.sections()
+    tasks = options.tasks or cfg['tasks']
+    # TODO: do not check repositories repeatedly
     for task in tasks:
-        if task == 'sya':
-            continue
         logging.info('-- Checking using %s configuration...' % task)
         backup_args = list(gen_opts)
-        backup_args.append(conffile[task]['repository'])
+        repo = cfg[task]['repository']
+        rcfg = cfg['repositories'][repo]
+        backup_args.append(rcfg['path'])
         try:
-            borg('check', backup_args, conffile[task]['passphrase'],
-                 options.dryrun)
+            borg('check', backup_args, rcfg['passphrase'], options.dryrun)
         except BackupError:
             logging.error("'%s' backup check failed. You should investigate."
                           % task)
         logging.info('-- Done checking %s.' % task)
 
 
-def mount(options, conffile, gen_opts):
+def mount(options, cfg, gen_opts):
     repo = None
     prefix = None
     if options.task:
-        repo = conffile[options.task]['repository']
-        prefix = conffile[options.task]['prefix']
+        repo = cfg['tasks'][options.task]['repository']
+        prefix = cfg['tasks'][options.task]['prefix']
     if options.repo:
-        repo = options.repo.strip('^')
+        repo = options.repo.rstrip('^')
     if options.prefix:
-        prefix = options.prefix.strip('^')
+        prefix = options.prefix.rstrip('^')
+
+    rcfg = cfg['repositories'][repo]
 
     raise NotImplementedError()
     logging.info("-- Mounting archive from repository {} with prefix {}..."
@@ -327,8 +336,7 @@ def mount(options, conffile, gen_opts):
     try:
         # TODO: proper passphrase/key support. Same for do_check, verify
         # correctness of do_backup.
-        borg('mount', borg_args, conffile[task]['passphrase'],
-             options.dryrun)
+        borg('mount', borg_args, rcfg['passphrase'], options.dryrun)
     except BackupError:
         logging.error("'{}:{}' mounting failed. You should investigate."
                       "".format(repo, prefix))
@@ -416,19 +424,23 @@ def main():
     if not os.path.isdir(options.confdir):
         sys.exit("Configuration directory '%s' not found." % options.confdir)
 
-    conffile = configparser.ConfigParser()
-    conffile.add_section('sya')
-    conffile['sya']['verbose'] = 'no'
-    conffile.read(os.path.join(options.confdir, DEFAULT_CONFFILE))
-    for section in conffile.sections():
-        if section != 'sya':
-            parse_conf(options.confdir, conffile[section])
+    with open(os.path.join(options.confdir, DEFAULT_CONFFILE), 'r') as f:
+        cfg = yaml.safe_load(f)
 
-    if conffile['sya'].getboolean('verbose'):
+    for task in cfg['tasks']:
+        parse_conf(options.confdir, cfg['tasks'][task])
+
+    # TODO: proper validation of the config file
+    if 'verbose' in cfg['sya']:
+        assert(isinstance(cfg['sya']['verbose'], bool))
+    if options.verbose:
+        cfg['sya']['verbose'] = options.verbose
+        del options.verbose
+    if cfg['sya']['verbose'].get(bool):
         logging.getLogger().setLevel(logging.DEBUG)
         gen_args.append('-v')
 
-    options.func(options, conffile, gen_args)
+    options.func(options, cfg, gen_args)
 
     logging.shutdown()
 

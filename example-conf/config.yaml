@@ -1,0 +1,44 @@
+sya:
+    verbose: true
+
+repositories:
+    # Todo: also support python pre-/post-scripts
+    therepo:
+        path: /foo
+        mount: pre-therepo.sh
+        umount: post-therepo.sh
+        compression: lz4
+        passphrase: xyz
+    otherdrive:
+        path: /bar
+        mount: !sh mount -o remount,rw /media/otherdrive
+        umount: !sh mount -o remount,ro /media/otherdrive
+        compression: lz4
+        remote-path: /home/user/.local/bin/borg-mod
+        passphrase-file: foo.key
+
+# TODO: specify -d several times and merge configs
+tasks:
+    documents:
+        run-this: false
+        keep:
+            hourly: 24
+            daily:  30
+            weekly: 8
+            monthly: 8
+        #keep: 24h 30d 8w 8m
+        prefix: mydocs
+        repository: therepo
+        include-file: docs.include
+        exclude-file: docs.exclude
+        includes: |
+            - /foo/bar
+            - /baz
+        pre: 
+            - !python |
+              print('whatever')
+              logging.info("...")
+            - !sh echo Starting...
+        post: !sh echo Success!
+
+# vim: set et sw=4 ts=4 :
