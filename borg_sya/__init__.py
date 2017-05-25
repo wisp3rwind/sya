@@ -21,7 +21,6 @@
 import sys
 import os
 from collections import Sequence
-from contextlib import contextmanager
 import logging
 import argparse
 import subprocess
@@ -83,7 +82,7 @@ def run(path, args=None, env=None, dryrun=False):
         subprocess.check_call(cmdline, env=env)
 
 
-def run_extra_script(path, options, name="", args=None, env=None, dryrun=False):
+def run_extra_script(path, options, name="", args=None, env=None):
     if path:
         if not os.path.isabs(path):
             path = os.path.join(options.confdir, path)
@@ -166,7 +165,7 @@ class Repository(PrePostScript):
                 with open(passphrase_file) as f:
                     self.passphrase = f.readline().strip()
             except IOError as e:
-                raise
+                raise InvalidConfigurationError()
 
     @property
     def borg_args(self, create=False):
@@ -187,6 +186,7 @@ class Repository(PrePostScript):
         except BackupError:
             logging.error(f"'{self.name}' backup check failed. You "
                           "should investigate.")
+            raise
 
     def __str__(self):
         """Used to construct the commandline arguments for borg, do not change!
@@ -199,7 +199,7 @@ class InvalidConfigurationError(Exception):
 
 
 class Task():
-    KEEP_INTERVALS= ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
+    KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
     def __init__(self, cfg, name, options):
         try:
@@ -207,8 +207,8 @@ class Task():
             tcfg = cfg['tasks'][name]
 
             if 'repository' not in tcfg:
-                logging.error("'repository' is mandatory for each task in config")
-                return
+                raise InvalidConfigurationError("'repository' is mandatory "
+                                                "for each task in config")
             self.repo = cfg['repositories'][tcfg['repository']]
 
             self.enabled = tcfg.get('run_this', True)
@@ -265,7 +265,8 @@ class Task():
         if options.progress:
             backup_args.append('--progress')
 
-        backup_args.append(f'{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
+        backup_args.append(
+            f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
 
         backup_args.extend(self.repo.borg_args(create=True))
 
@@ -295,7 +296,8 @@ class Task():
                 borg('create', backup_args, self.repo.passphrase,
                      options.dryrun)
         except BackupError:
-            logging.error(f"'{self.name}' backup failed. You should investigate.")
+            logging.error(f"'{self.name}' backup failed. "
+                          "You should investigate.")
             raise
 
     def prune(self, cfg, options, gen_opts):
@@ -306,14 +308,14 @@ class Task():
                 backup_cleanup_args.append('--stats')
             for interval, number in self.keep.items():
                 backup_cleanup_args.extend([f'--keep-{interval}', number])
-            backup_cleanup_args.append(f'--prefix={prefix}-')
-            backup_cleanup_args.append(f"{repo}")
+            backup_cleanup_args.append(f'--prefix={self.prefix}-')
+            backup_cleanup_args.append(f"{self.repo}")
             try:
                 with self:
                     borg('prune', backup_cleanup_args,
                          self.repo.passphrase, options.dryrun)
             except BackupError:
-                logging.error(f"'{name}' old files cleanup failed. "
+                logging.error(f"'{self.name}' old files cleanup failed. "
                               "You should investigate.")
                 raise
 
@@ -373,7 +375,7 @@ def do_backup(options, cfg, gen_args):
     lock.release()
 
 
-def do_check(options, conffile, gen_opts):
+def do_check(options, cfg, gen_opts):
     tasks = options.tasks or cfg['tasks']
     repos = set(cfg['tasks'][task].repo for task in tasks)
 
