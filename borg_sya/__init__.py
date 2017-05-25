@@ -43,6 +43,16 @@ def which(command):
     sys.exit(f"{command} error: command not found.")
 
 
+def isexec(path):
+    if os.path.isfile(path):
+        if os.access(path, os.X_OK):
+            return(True)
+        else:
+            logging.warn(f"{path} exists, but cannot be executed "
+                         "by the current user.")
+    return(False)
+
+
 BINARY = which('borg')
 
 
@@ -71,6 +81,14 @@ class ProcessLock():
 
     def release(self):
         self.socket.close()
+
+
+class InvalidConfigurationError(Exception):
+    pass
+
+
+class BackupError(Exception):
+    pass
 
 
 class PrePostScript():
@@ -117,6 +135,50 @@ class PrePostScript():
                     self.borg.run_script(script, self.options,
                                          name=self.post_desc,
                                          args=1 if type else 0)
+
+
+class Borg():
+    """Encapsulate all information related to running external tools.
+    """
+    def __init__(self, confdir, dryrun, verbose):
+        self.confdir = confdir
+        self.dryrun = dryrun
+        self.verbose = verbose
+
+    def _run(self, path, args=None, env=None):
+        if self.dryrun:
+            logging.info(f"$ {path} {' '.join(args or [])}")
+            # print("$ %s %s" % (path, ' '.join(args or []), ))
+        else:
+            cmdline = [path]
+            if args is not None:
+                cmdline.extend(args)
+            subprocess.check_call(cmdline, env=env)
+
+    def run_script(self, path, msg="", args=None, env=None):
+        if path:
+            if not os.path.isabs(path):
+                path = os.path.join(self.confdir, path)
+            if isexec(path):
+                try:
+                    self._run(path, args, env)
+                except CalledProcessError as e:
+                    if msg:
+                        logging.error(f"{msg} failed. You should investigate.")
+                    logging.error(e)
+                    raise BackupError()
+
+    def __call__(self, command, args, repo):
+        env = repo.borg_env() or None
+
+        if self.verbose:
+            args.insert(0, '--verbose')
+        args.insert(0, command)
+        try:
+            self._run(BINARY, args, env=env)
+        except CalledProcessError as e:
+            logging.error(e)
+            raise BackupError()
 
 
 class Repository(PrePostScript):
@@ -178,10 +240,6 @@ class Repository(PrePostScript):
         """Used to construct the commandline arguments for borg, do not change!
         """
         return(self.path)
-
-
-class InvalidConfigurationError(Exception):
-    pass
 
 
 class Task():
@@ -304,70 +362,48 @@ class Task():
                 raise
 
 
-def isexec(path):
-    if os.path.isfile(path):
-        if os.access(path, os.X_OK):
-            return(True)
-        else:
-            logging.warn(f"{path} exists, but cannot be executed "
-                         "by the current user.")
-    return(False)
-
-
-class BackupError(Exception):
-    pass
-
-
-class Borg():
-    """Encapsulate all information related to running external tools.
-    """
-    def __init__(self, confdir, dryrun, verbose):
-        self.confdir = confdir
-        self.dryrun = dryrun
-        self.verbose = verbose
-
-    def _run(self, path, args=None, env=None):
-        if self.dryrun:
-            logging.info(f"$ {path} {' '.join(args or [])}")
-            # print("$ %s %s" % (path, ' '.join(args or []), ))
-        else:
-            cmdline = [path]
-            if args is not None:
-                cmdline.extend(args)
-            subprocess.check_call(cmdline, env=env)
-
-    def run_script(self, path, name="", args=None, env=None):
-        if path:
-            if not os.path.isabs(path):
-                path = os.path.join(self.confdir, path)
-            if isexec(path):
-                try:
-                    self._run(path, args, env)
-                except CalledProcessError as e:
-                    if name:
-                        logging.error(f"{name} failed. You should investigate.")
-                    logging.error(e)
-                    raise BackupError()
-
-    def __call__(self, command, args, repo):
-        env = repo.borg_env() or None
-
-        if self.verbose:
-            args.insert(0, '--verbose')
-        args.insert(0, command)
-        try:
-            self._run(BINARY, args, env=env)
-        except CalledProcessError as e:
-            logging.error(e)
-            raise BackupError()
-
-
 def pass_object(f):
     @wraps(f)
     @click.pass_context
     def wrapper(ctx, *args, **kwargs):
         return ctx.invoke(f, ctx.obj, *args, **kwargs)
     return(wrapper)
+
+
+@click.group()
+@click.option('-d', '--config-dir', 'confdir',
+              default=DEFAULT_CONFDIR,
+              help="Configuration directory, default is {DEFAULT_CONFDIR}")
+@click.option('-n', '--dry-run', 'dryrun', is_flag=True,
+              help="Do not run backup, don't act.")
+@click.option('-v', '--verbose', is_flag=True,
+              help="Be verbose and print stats.")
+def main(confdir, dryrun, verbose):
+    logging.basicConfig(format='%(message)s', level=logging.WARNING)
+
+    if not os.path.isdir(confdir):
+        sys.exit(f"Configuration directory '{confdir}' not found.")
+
+    with open(os.path.join(DEFAULT_CONFFILE), 'r') as f:
+        cfg = yaml.safe_load(f)
+
+    # TODO: proper validation of the config file
+    if 'verbose' in cfg['sya']:
+        assert(isinstance(cfg['sya']['verbose'], bool))
+        verbose = verbose or cfg['sya']['verbose']
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # Object to hold all global state.
+    borg = Borg(confdir, dryrun, verbose)
+
+    # Parse configuration into corresponding classes.
+    borg.repos = {repo: Repository(cfg, cfg['repositories'][repo], borg)
+                  for repo in cfg['repositories']}
+    borg.tasks = {task: Task(cfg, cfg['tasks'][task], borg)
+                  for task in cfg['tasks']}
+
+    logging.shutdown()
 
 
 @main.command(help="Do a backup run.")
@@ -460,60 +496,31 @@ def mount(repo, prefix, umask, foreground, item, mountpoint, borg):
     raise NotImplementedError()
     logging.info(f"-- Mounting archive from repository {repo.name} "
                  "with prefix {prefix}...")
-    logging.info(f"-- Selected archive {archive}")
-    borg_args = []
-    borg_args.append(f"{repo}")
-    try:
-        # TODO: proper passphrase/key support. Same for do_check, verify
-        # correctness of do_backup.
-        borg('mount', borg_args, repo.passphrase)
-    except BackupError:
-        logging.error(f"'{repo}:{prefix}' mounting failed. "
-                      "You should investigate.")
-        raise
+    with repo:
+        archive = None
+        if index:
+            args = repo.borg_args()
+            args.append(f"{repo}")
+            # args.append('--short')
+            # format: 'prefix     Mon, 2017-05-22 02:52:37'
+            archives = borg('list', args, repo)
+            archive = archives.split('\n')[-index]
+            logging.info(f"-- Selected archive {archive}")
+        args = repo.borg_args()
+        if archive:
+            args.append(f"{repo}::{archive}")
+        else:
+            args.append(f"{repo}")
+        try:
+            # TODO: proper passphrase/key support. Same for do_check, verify
+            # correctness of do_backup.
+            borg('mount', args, repo)
+        except BackupError:
+            logging.error(f"'{repo}:{prefix}' mounting failed. "
+                          "You should investigate.")
+            raise
     # TODO: is this true?
     logging.info('-- Done mounting. borg has daemonized, manually unmount '
                  'the repo to shut down the FUSE driver.')
-
-
-
-
-
-
-
-@click.group()
-@click.option('-d', '--config-dir', 'confdir',
-              default=DEFAULT_CONFDIR,
-              help="Configuration directory, default is {DEFAULT_CONFDIR}")
-@click.option('-n', '--dry-run', 'dryrun', is_flag=True,
-              help="Do not run backup, don't act.")
-@click.option('-v', '--verbose', is_flag=True,
-              help="Be verbose and print stats.")
-def main(confdir, dryrun, verbose):
-    logging.basicConfig(format='%(message)s', level=logging.WARNING)
-
-    if not os.path.isdir(confdir):
-        sys.exit(f"Configuration directory '{confdir}' not found.")
-
-    with open(os.path.join(DEFAULT_CONFFILE), 'r') as f:
-        cfg = yaml.safe_load(f)
-
-    # TODO: proper validation of the config file
-    if 'verbose' in cfg['sya']:
-        assert(isinstance(cfg['sya']['verbose'], bool))
-        verbose = verbose or cfg['sya']['verbose']
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    # Object to hold all global state.
-    borg = Borg(confdir, dryrun, verbose)
-
-    # Parse configuration into corresponding classes.
-    borg.repos = {repo: Repository(cfg, cfg['repositories'][repo], borg)
-                  for repo in cfg['repositories']}
-    borg.tasks = {task: Task(cfg, cfg['tasks'][task], borg)
-                  for task in cfg['tasks']}
-
-    logging.shutdown()
 
 # vim: ts=4 sw=4 expandtab
