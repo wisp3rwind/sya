@@ -183,24 +183,109 @@ class Repository(PrePostScript):
         return(self.path)
 
 
-class Task():
-    def __init__(self, cfg, name):
-        tcfg = cfg['tasks'][name]
+class InvalidConfigurationError(Exception):
+    pass
 
-        if 'repository' not in tcfg:
-            logging.error("'repository' is mandatory for each task in config")
+
+class Task():
+    def __init__(self, cfg, name, options):
+        try:
+            self.name = name
+            tcfg = cfg['tasks'][name]
+
+            if 'repository' not in tcfg:
+                logging.error("'repository' is mandatory for each task in config")
+                return
+            self.repo = cfg['repositories'][tcfg['repository']]
+
+            self.enabled = tcfg.get('run_this', True)
+            self.keep = tcfg.get('keep', {})
+            if not all(k in KEEP_FLAGS for k in self.keep):
+                raise InvalidConfigurationError()
+            self.prefix = tcfg.get('prefix', '{hostname}')
+            self.include_file = tcfg.get('include_file', None)
+            self.exclude_file = tcfg.get('exclude_file', None)
+            self.includes = tcfg.get('includes', [])
+            if not self.includes and not self.include_file:
+                raise InvalidConfigurationError(f"'paths' is mandatory in "
+                                                "configuration file {name}")
+            if self.include_file:
+                self.include_file = os.path.join(options.confdir,
+                                                 self.include_file)
+            if self.exclude_file:
+                self.exclude_file = os.path.join(options.confdir,
+                                                 self.exclude_file)
+            self.scripts = PrePostScript(
+                tcfg.get('pre', None), f"'{name}' pre-backup script",
+                tcfg.get('post', None), f"'{name}' post-backup script",
+                options)
+        except (KeyError, ValueError, TypeError) as e:
+            raise InvalidConfigurationError(str(e))
+
+    def backup(self, cfg, options, gen_opts):
+        # Check if we want to run this backup task
+        if not self.enabled:
+            logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
+                          "in {name}")
             return
 
-        self.repo = Repository(cfg, cfg['repository'])
+        backup_args = list(gen_opts)
 
-        self.scripts = PrePostScript(cfg['pre'], '', cfg['post'], '')
+        if cfg['sya']['verbose']:
+            backup_args.append('--stats')
 
-    @property
-    def run_this(self):
-        return(self.cfg['run-this'])
+        if options.progress:
+            backup_args.append('--progress')
 
-    def backup(self):
-        with self.repo:
+        backup_args.append(f'{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
+
+        backup_args.extend(self.repo.borg_args(create=True))
+
+        # include and exclude patterns
+        includes = self.includes[:]
+        excludes = []
+        if self.include_file:
+            with open(self.include_file) as f:
+                for line in f.readlines():
+                    if line.startswith('- '):
+                        excludes.append(line[2:])
+                    else:
+                        includes.append(line)
+
+        if self.exclude_file:
+            with open(self.exclude_file) as f:
+                excludes.extend(f.readlines())
+
+        for exclude in excludes:
+            backup_args.extend(['--exclude', exclude.strip()])
+        backup_args.extend(i.strip() for i in includes)
+
+        # Load and execute if applicable pre-task commands
+        with self.scripts as status:
+            # run the backup
+            try:
+                borg('create', backup_args, self.repo.passphrase, options.dryrun)
+            except BackupError:
+                logging.error(f"'{self.name}' backup failed. You should investigate.")
+                status.append('1')
+            else:
+                status.append('0')
+                # prune old backups
+                if self.keep:
+                    backup_cleanup_args = list(gen_opts)
+                    if cfg['sya']['verbose']:
+                        backup_cleanup_args.append('--list')
+                        backup_cleanup_args.append('--stats')
+                    for interval, number in self.keep.items():
+                        backup_cleanup_args.extend([f'--{interval}', number])
+                    backup_cleanup_args.append(f'--prefix={prefix}-')
+                    backup_cleanup_args.append(f"{repo}")
+                    try:
+                        borg('prune', backup_cleanup_args, repo.passphrase,
+                             options.dryrun)
+                    except BackupError:
+                        logging.error(f"'{name}' old files cleanup failed. "
+                                      "You should investigate.")
 
 
 def isexec(path):
@@ -235,91 +320,6 @@ KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
               'keep-yearly')
 
 
-def process_task(options, cfg, name, gen_opts):
-    tcfg = cfg['tasks'][name]
-    repo = cfg['repositories'][tcfg['repository']]
-    backup_args = list(gen_opts)
-
-    if cfg['sya']['verbose']:
-        backup_args.append('--stats')
-
-    if options.progress:
-        backup_args.append('--progress')
-
-    # Check if we want to run this backup task
-    if not cfg.get('run_this', True):
-        logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
-                      "in {name}")
-        return
-
-    try:
-        prefix = tcfg['prefix']
-    except KeyError:
-        prefix = '{hostname}'
-    backup_args.append(f'{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}'.format(
-        repo=repo,
-        prefix=prefix))
-
-    backup_args.extend(repo.borg_args(create=True))
-
-    # Loading source paths
-    includes = []
-    if 'includes' in tcfg:
-        includes.extend(tcfg['includes'])
-    elif 'include-file' not in tcfg:
-        logging.error(f"'paths' is mandatory in configuration file {name}")
-        return
-
-    # include and exclude patterns
-    excludes = []
-    if 'include-file' in conf:
-        with open(os.path.join(options.confdir, tcfg['include_file'])) as f:
-            for line in f.readlines():
-                if line.startswith('- '):
-                    excludes.append(line[2:])
-                else:
-                    includes.append(line)
-
-    if 'exclude-file' in conf:
-        with open(os.path.join(options.confdir, tcfg['exclude_file'])) as f:
-            excludes.extend(f.readlines())
-
-    for exclude in excludes:
-        backup_args.extend(['--exclude', exclude.strip()])
-    backup_args.extend(i.strip() for i in includes)
-
-    # Load and execute if applicable pre-task commands
-    with PrePostScript(
-            tcfg.get('pre', None), f"'{name}' pre-backup script",
-            tcfg.get('post', None), f"'{name}' post-backup script",
-            options) as status:
-        # run the backup
-        try:
-            borg('create', backup_args, repo.passphrase, options.dryrun)
-        except BackupError:
-            logging.error(f"'{name}' backup failed. You should investigate.")
-            status.append('1')
-        else:
-            status.append('0')
-            # prune old backups
-            if any(k in tcfg for k in KEEP_FLAGS):
-                backup_cleanup_args = list(gen_opts)
-                if cfg['sya']['verbose']:
-                    backup_cleanup_args.append('--list')
-                    backup_cleanup_args.append('--stats')
-                for keep in KEEP_FLAGS:
-                    if keep in tcfg:
-                        backup_cleanup_args.extend(['--' + keep, tcfg[keep]])
-                backup_cleanup_args.append(f'--prefix={prefix}-')
-                backup_cleanup_args.append(f"{repo}")
-                try:
-                    borg('prune', backup_cleanup_args, repo.passphrase,
-                         options.dryrun)
-                except BackupError:
-                    logging.error(f"'{name}' old files cleanup failed. "
-                                  "You should investigate.")
-
-
 def do_backup(options, cfg, gen_args):
     lock = ProcessLock('sya' + options.confdir)
     try:
@@ -338,7 +338,7 @@ def do_backup(options, cfg, gen_args):
         tasks = options.tasks or cfg['tasks']
         for task in tasks:
             logging.info(f'-- Backing up using {task} configuration...')
-            process_task(options, cfg, task, gen_args)
+            process_task(options, gen_args)
             logging.info(f'-- Done backing up {task}.')
 
     lock.release()
