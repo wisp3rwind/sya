@@ -260,32 +260,35 @@ class Task():
             backup_args.extend(['--exclude', exclude.strip()])
         backup_args.extend(i.strip() for i in includes)
 
-        # Load and execute if applicable pre-task commands
-        with self.scripts as status:
-            # run the backup
-            try:
-                borg('create', backup_args, self.repo.passphrase, options.dryrun)
-            except BackupError:
-                logging.error(f"'{self.name}' backup failed. You should investigate.")
-                status.append('1')
-            else:
-                status.append('0')
-                # prune old backups
-                if self.keep:
-                    backup_cleanup_args = list(gen_opts)
-                    if cfg['sya']['verbose']:
-                        backup_cleanup_args.append('--list')
-                        backup_cleanup_args.append('--stats')
-                    for interval, number in self.keep.items():
-                        backup_cleanup_args.extend([f'--{interval}', number])
-                    backup_cleanup_args.append(f'--prefix={prefix}-')
-                    backup_cleanup_args.append(f"{repo}")
-                    try:
-                        borg('prune', backup_cleanup_args, repo.passphrase,
-                             options.dryrun)
-                    except BackupError:
-                        logging.error(f"'{name}' old files cleanup failed. "
-                                      "You should investigate.")
+        # run the backup
+        try:
+            # Load and execute if applicable pre-task commands
+            with self.repo, self.scripts as status:
+                borg('create', backup_args, self.repo.passphrase,
+                     options.dryrun)
+        except BackupError:
+            logging.error(f"'{self.name}' backup failed. You should investigate.")
+            status.append('1')
+        else:
+            status.append('0')
+
+    def prune(self, cfg, options, gen_opts):
+        if self.keep:
+                backup_cleanup_args = list(gen_opts)
+                if cfg['sya']['verbose']:
+                    backup_cleanup_args.append('--list')
+                    backup_cleanup_args.append('--stats')
+                for interval, number in self.keep.items():
+                    backup_cleanup_args.extend([f'--{interval}', number])
+                backup_cleanup_args.append(f'--prefix={prefix}-')
+                backup_cleanup_args.append(f"{repo}")
+                try:
+                    with self.repo, self.scripts:
+                        borg('prune', backup_cleanup_args,
+                             self.repo.passphrase, options.dryrun)
+                except BackupError:
+                    logging.error(f"'{name}' old files cleanup failed. "
+                                  "You should investigate.")
 
 
 def isexec(path):
@@ -331,14 +334,16 @@ def do_backup(options, cfg, gen_args):
 
     # Wrap in global 'pre' and 'post' scripts if they exists
     with PrePostScript(
-            conffile['sya'].get('pre', None), "Global pre script",
-            conffile['sya'].get('post', None), "Global post script",
+            cfg['sya'].get('pre', None), "Global pre script",
+            cfg['sya'].get('post', None), "Global post script",
             options):
         # Task loop
         tasks = options.tasks or cfg['tasks']
         for task in tasks:
+            task = cfg['tasks'][task]
             logging.info(f'-- Backing up using {task} configuration...')
-            process_task(options, gen_args)
+            task.backup(cfg, options, gen_args)
+            task.prune(cfg, options, gen_args)
             logging.info(f'-- Done backing up {task}.')
 
     lock.release()
