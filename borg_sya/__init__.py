@@ -126,6 +126,56 @@ class PrePostScript():
                                  args=self.post_args)
 
 
+class Repository(PrePostScript):
+    def __init__(self, cfg, name, options):
+        self.name = name
+        cfg = cfg['repositories'][name]
+
+        self.path = cfg['path']
+
+        super().__init__(
+            cfg.get('mount', None), f'Mount script for repository {name}',
+            cfg.get('umount', None), f'Unmount script for repository {name}',
+            options
+        )
+
+        self.compression = cfg.get('compression', None)
+        self.passphrase = cfg.get('passphrase', '')
+        passphrase_file = cfg.get('passphrase-file', None)
+        self.remote_path = cfg.get('remote-path', None)
+
+        # check if we have a passphrase file
+        if passphrase_file:
+            passphrase_file = os.path.join(confdir, passphrase_file)
+            try:
+                with open(passphrase_file) as f:
+                    self.passphrase = f.readline().strip()
+            except IOError as e:
+                raise
+
+    def mount(self):
+        self.__enter__()
+
+    def umount(self):
+        self.__exit__()
+
+    @property
+    def borg_args(self, create=False):
+        args = []
+        if self.remote_path:
+            args.extend(['--remote-path', self.remote_path])
+
+        if create and self.compression:
+            args.extend(['--compression', self.compression])
+
+        return(args)
+
+    def __str__(self):
+        """Used to construct the commandline arguments for borg, do not change!
+        """
+        return(self.path)
+
+
 def isexec(path):
     if os.path.isfile(path):
         if os.access(path, os.X_OK):
@@ -154,7 +204,7 @@ def borg(command, args, passphrase=None, dryrun=False):
         raise BackupError()
 
 
-def parse_conf(confdir, cfg, name):
+def parse_conf(confdir, cfg, name, options):
     tcfg = cfg['tasks'][name]
 
     # Loading target dir
@@ -162,22 +212,7 @@ def parse_conf(confdir, cfg, name):
         logging.error("'repository' is mandatory for each task in config")
         return
 
-    parse_repo_conf(confdir, tcfg['repository'])
-
-
-def parse_repo_conf(confdir, cfg, name):
-    rcfg = cfg['repositories'][name]
-
-    # check if we have a passphrase file
-    if 'passphrase_file' in rcfg:
-        rcfg['passphrase_file'] = os.path.join(confdir, rcfg['passphrase_file'])
-        with open(rcfg['passphrase_file']) as f:
-            rcfg['passphrase'] = f.readline().strip()
-    else:
-        rcfg['passphrase_file'] = ''
-        rcfg['passphrase'] = ''
-
-    return conf
+    cfg['repositories'][repo] = Repository(cfg, cfg['repositories'][repo], options)
 
 
 KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
@@ -186,7 +221,7 @@ KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
 
 def process_task(options, cfg, name, gen_opts):
     tcfg = cfg['tasks'][name]
-    rcfg = cfg['repositories'][tcfg['repository']]
+    repo = cfg['repositories'][tcfg['repository']]
     backup_args = list(gen_opts)
 
     if cfg['sya']['verbose']:
@@ -205,15 +240,11 @@ def process_task(options, cfg, name, gen_opts):
         prefix = tcfg['prefix']
     except KeyError:
         prefix = '{hostname}'
-    backup_args.append('{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}'.format(
-        repo=['path'], 
+    backup_args.append(f'{repo}::{prefix}-{{now:%Y-%m-%d_%H:%M:%S}}'.format(
+        repo=repo,
         prefix=prefix))
 
-    if 'remote-path' in rcfg:
-        backup_args.extend('--remote-path', rcfg['remote-path']) 
-
-    if 'compression' in rcfg:
-        backup_args.extend(['--compression', rcfg['compression']])
+    backup_args.extend(repo.borg_args(create=True))
 
     # Loading source paths
     includes = []
@@ -248,7 +279,7 @@ def process_task(options, cfg, name, gen_opts):
             options) as status:
         # run the backup
         try:
-            borg('create', backup_args, rcfg['passphrase'], options.dryrun)
+            borg('create', backup_args, repo.passphrase, options.dryrun)
         except BackupError:
             logging.error("'%s' backup failed. You should investigate." % name)
             status.append('1')
@@ -264,9 +295,9 @@ def process_task(options, cfg, name, gen_opts):
                     if keep in tcfg:
                         backup_cleanup_args.extend(['--' + keep, tcfg[keep]])
                 backup_cleanup_args.append('--prefix={}-'.format(prefix))
-                backup_cleanup_args.append(conf['repository'])
+                backup_cleanup_args.append(f"{repo}")
                 try:
-                    borg('prune', backup_cleanup_args, rcfg['passphrase'],
+                    borg('prune', backup_cleanup_args, repo.passphrase,
                          options.dryrun)
                 except BackupError:
                     logging.error("'%s' old files cleanup failed. You should "
@@ -304,10 +335,10 @@ def do_check(options, conffile, gen_opts):
         logging.info('-- Checking using %s configuration...' % task)
         backup_args = list(gen_opts)
         repo = cfg[task]['repository']
-        rcfg = cfg['repositories'][repo]
-        backup_args.append(rcfg['path'])
+        repo = cfg['repositories'][repo]
+        backup_args.append(f"{repo}")
         try:
-            borg('check', backup_args, rcfg['passphrase'], options.dryrun)
+            borg('check', backup_args, repo.passphrase, options.dryrun)
         except BackupError:
             logging.error("'%s' backup check failed. You should investigate."
                           % task)
@@ -325,21 +356,21 @@ def mount(options, cfg, gen_opts):
     if options.prefix:
         prefix = options.prefix.rstrip('^')
 
-    rcfg = cfg['repositories'][repo]
+    repo = cfg['repositories'][repo]
 
     raise NotImplementedError()
     logging.info("-- Mounting archive from repository {} with prefix {}..."
-                 "".format(repo, prefix))
+                 "".format(repo.name, prefix))
     logging.info("-- Selected archive {}".format(""))
     borg_args = list(gen_opts)
-    borg_args.append(repo)
+    borg_args.append(f"{repo}")
     try:
         # TODO: proper passphrase/key support. Same for do_check, verify
         # correctness of do_backup.
-        borg('mount', borg_args, rcfg['passphrase'], options.dryrun)
+        borg('mount', borg_args, repo.passphrase, options.dryrun)
     except BackupError:
         logging.error("'{}:{}' mounting failed. You should investigate."
-                      "".format(repo, prefix))
+                      "".format(repo.name, prefix))
     # TODO: is this true?
     logging.info('-- Done mounting. borg has daemonized, manually unmount '
                  'the repo to shut down the FUSE driver.')
@@ -428,7 +459,7 @@ def main():
         cfg = yaml.safe_load(f)
 
     for task in cfg['tasks']:
-        parse_conf(options.confdir, cfg['tasks'][task])
+        parse_conf(options.confdir, cfg['tasks'][task], options)
 
     # TODO: proper validation of the config file
     if 'verbose' in cfg['sya']:
