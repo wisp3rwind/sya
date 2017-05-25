@@ -96,20 +96,25 @@ def run_extra_script(path, options, name="", args=None, env=None, dryrun=False):
                 raise BackupError()
 
 
-@contextmanager
-def prepostscript(pre_path, pre_name, post_path, post_name, options):
-    # Exceptions from the pre- and post-scripts are intended to propagate.
-    # If this function simply didn't yield in case of an exception in the
-    # pre-script, some kind of error would occur (didn't test, but probably
-    # something akin 'generator didn't yield').
-    run_extra_script(pre_path, options, name=pre_name)
-    post_args = []
-    try:
-        yield post_args
-    finally:
+class PrePostScript():
+    def __init__(self, pre_path, pre_name, post_path, post_name, options):
+        self.pre_path = pre_path
+        self.pre_name = pre_name
+        self.post_path = post_path
+        self.post_name = post_name
+        self.options = options
+
+    def __enter__(self):
+        self.result = []
+        # Exceptions from the pre- and post-scripts are intended to propagate!
+        run_extra_script(self.pre_path, self.options, name=self.pre_name)
+        return(self.result)
+
+    def __exit__(self, type, value, traceback):
         # Maybe use an environment variable instead?
         # (BACKUP_STATUS=<borg returncode>)
-        run_extra_script(post_path, options, name=post_name, args=post_args)
+        run_extra_script(self.post_path, self.options, name=self.post_name,
+                         args=self.post_args)
 
 
 def isexec(path):
@@ -219,7 +224,7 @@ def process_task(options, conffile, task, gen_opts):
     backup_args.extend(i.strip() for i in includes)
 
     # Load and execute if applicable pre-task commands
-    with prepostscript(
+    with PrePostScript(
             conf.get('pre', None), "'%s' pre-backup script" % task,
             conf.get('post', None), "'%s' post-backup script" % task,
             options) as status:
@@ -260,7 +265,7 @@ def do_backup(options, conffile, gen_args):
         sys.exit(1)
 
     # Wrap in global 'pre' and 'post' scripts if they exists
-    with prepostscript(
+    with PrePostScript(
             conffile['sya'].get('pre', None), "Global pre script",
             conffile['sya'].get('post', None), "Global post script",
             options):
