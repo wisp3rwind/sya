@@ -105,25 +105,32 @@ class PrePostScript():
         self.post_desc = post_desc
         self.options = options
 
+        self.nesting_level = 0
+
     def __enter__(self):
-        self.result = []
-        # Exceptions from the pre- and post-scripts are intended to propagate!
-        if self.pre:  # don't fail if self.pre == None
-            if not isinstance(self.pre, Sequence):
-                self.pre = [self.pre]
-            for script in self.pre:
-                run_extra_script(script, self.options, name=self.pre_desc)
+        if self.nesting_level == 0:
+            self.result = []
+            # Exceptions from the pre- and post-scripts are intended to
+            # propagate!
+            if self.pre:  # don't fail if self.pre == None
+                if not isinstance(self.pre, Sequence):
+                    self.pre = [self.pre]
+                for script in self.pre:
+                    run_extra_script(script, self.options, name=self.pre_desc)
+        self.nesting_level += 1
         return(self.result)
 
     def __exit__(self, type, value, traceback):
-        # Maybe use an environment variable instead?
-        # (BACKUP_STATUS=<borg returncode>)
-        if self.post:  # don't fail if self.post == None
-            if not isinstance(self.post, Sequence):
-                self.post = [self.post]
-            for script in self.post:
-                run_extra_script(script, self.options, name=self.post_desc,
-                                 args=self.post_args)
+        self.nesting_level -= 1
+        if self.nesting_level == 0:
+            if self.post:  # don't fail if self.post == None
+                if not isinstance(self.post, Sequence):
+                    self.post = [self.post]
+                for script in self.post:
+                    # Maybe use an environment variable instead?
+                    # (BACKUP_STATUS=<borg returncode>)
+                    run_extra_script(script, self.options, name=self.post_desc,
+                                     args=self.post_args)
 
 
 class Repository(PrePostScript):
