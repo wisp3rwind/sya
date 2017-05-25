@@ -151,7 +151,7 @@ class Repository(PrePostScript):
 
         # check if we have a passphrase file
         if passphrase_file:
-            passphrase_file = os.path.join(confdir, passphrase_file)
+            passphrase_file = os.path.join(options.confdir, passphrase_file)
             try:
                 with open(passphrase_file) as f:
                     self.passphrase = f.readline().strip()
