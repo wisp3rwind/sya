@@ -18,14 +18,14 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 
-import sys
-import os
 from collections import Sequence
 import logging
-import argparse
+import os
+import socket
 import subprocess
 from subprocess import CalledProcessError
-import socket
+import sys
+
 import yaml
 
 
@@ -48,7 +48,7 @@ class LockInUse(Exception):
     pass
 
 
-class ProcessLock(object):
+class ProcessLock():
     """This class comes from this very elegant way of having a pid lock in
     order to prevent multiple instances from running on the same host.
     http://stackoverflow.com/a/7758075
@@ -178,8 +178,8 @@ class Repository(PrePostScript):
 
         return(args)
 
-    def check(self, options, gen_opts):
-        backup_args = list(gen_opts)
+    def check(self, options, borg):
+        backup_args = []
         backup_args.append(f"{self}")
         try:
             borg('check', backup_args, self.passphrase, options.dryrun)
@@ -250,14 +250,14 @@ class Task():
         self.repo.__exit__(*exc)
         self.scripts.__exit__(*exc)
 
-    def backup(self, cfg, options, gen_opts):
+    def backup(self, cfg, options, borg):
         # Check if we want to run this backup task
         if not self.enabled:
             logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
                           "in {name}")
             return
 
-        backup_args = list(gen_opts)
+        backup_args = []
 
         if cfg['sya']['verbose']:
             backup_args.append('--stats')
@@ -300,9 +300,9 @@ class Task():
                           "You should investigate.")
             raise
 
-    def prune(self, cfg, options, gen_opts):
+    def prune(self, cfg, options, borg):
         if self.keep:
-            backup_cleanup_args = list(gen_opts)
+            backup_cleanup_args = []
             if cfg['sya']['verbose']:
                 backup_cleanup_args.append('--list')
                 backup_cleanup_args.append('--stats')
@@ -334,21 +334,28 @@ class BackupError(Exception):
     pass
 
 
-def borg(command, args, passphrase=None, dryrun=False):
-    if passphrase:
-        env = {'BORG_PASSPHRASE': passphrase, }
-    else:
-        env = None
+class Borg():
+    def __init__(self, verbose, dryrun):
+        self.verbose = verbose
+        self.dryrun = dryun
 
-    args.insert(0, command)
-    try:
-        run(BINARY, args, env=env, dryrun=dryrun)
-    except CalledProcessError as e:
-        logging.error(e)
-        raise BackupError()
+    def __call__(self, command, args, passphrase=None):
+        if passphrase:
+            env = {'BORG_PASSPHRASE': passphrase, }
+        else:
+            env = None
+
+        if self.verbose:
+            args.insert(0, '--verbose')
+        args.insert(0, command)
+        try:
+            run(BINARY, args, env=env, dryrun=self.dryrun)
+        except CalledProcessError as e:
+            logging.error(e)
+            raise BackupError()
 
 
-def do_backup(options, cfg, gen_args):
+def create(options, cfg, borg):
     lock = ProcessLock('sya' + options.confdir)
     try:
         lock.acquire()
@@ -368,16 +375,16 @@ def do_backup(options, cfg, gen_args):
             task = cfg['tasks'][task]
             logging.info(f'-- Backing up using {task} configuration...')
             with task(lazy=True):
-                task.backup(cfg, options, gen_args)
-                task.prune(cfg, options, gen_args)
+                task.backup(cfg, options, borg)
+                task.prune(cfg, options, borg)
             logging.info(f'-- Done backing up {task}.')
 
     lock.release()
 
 
-def do_check(options, cfg, gen_opts):
     tasks = options.tasks or cfg['tasks']
     repos = set(cfg['tasks'][task].repo for task in tasks)
+def check(ctx, progress, repo, items):
 
     for repo in repos:
         logging.info(f'-- Checking repository {repo.name}...')
@@ -385,7 +392,7 @@ def do_check(options, cfg, gen_opts):
         logging.info(f'-- Done checking {repo.name}.')
 
 
-def mount(options, cfg, gen_opts):
+def mount(options, cfg, borg):
     repo = None
     prefix = None
     if options.task:
@@ -402,7 +409,7 @@ def mount(options, cfg, gen_opts):
     logging.info(f"-- Mounting archive from repository {repo.name} "
                  "with prefix {prefix}...")
     logging.info(f"-- Selected archive {archive}")
-    borg_args = list(gen_opts)
+    borg_args = []
     borg_args.append(f"{repo}")
     try:
         # TODO: proper passphrase/key support. Same for do_check, verify
@@ -488,8 +495,6 @@ def main():
 
     options = p.parse_args()
 
-    gen_args = []
-
     logging.basicConfig(format='%(message)s', level=logging.WARNING)
 
     if not os.path.isdir(options.confdir):
@@ -513,9 +518,10 @@ def main():
         del options.verbose
     if cfg['sya']['verbose'].get(bool):
         logging.getLogger().setLevel(logging.DEBUG)
-        gen_args.append('-v')
 
-    options.func(options, cfg, gen_args)
+    borg = Borg(cfg['sya']['verbose'], options.dryrun)
+
+    options.func(options, cfg, borg)
 
     logging.shutdown()
 
