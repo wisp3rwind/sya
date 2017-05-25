@@ -180,6 +180,8 @@ class InvalidConfigurationError(Exception):
 
 
 class Task():
+    KEEP_INTERVALS= ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
+
     def __init__(self, cfg, name, options):
         try:
             self.name = name
@@ -192,7 +194,7 @@ class Task():
 
             self.enabled = tcfg.get('run_this', True)
             self.keep = tcfg.get('keep', {})
-            if not all(k in KEEP_FLAGS for k in self.keep):
+            if not all(k in self.KEEP_INTERVALS for k in self.keep):
                 raise InvalidConfigurationError()
             self.prefix = tcfg.get('prefix', '{hostname}')
             self.include_file = tcfg.get('include_file', None)
@@ -269,7 +271,7 @@ class Task():
                 backup_cleanup_args.append('--list')
                 backup_cleanup_args.append('--stats')
             for interval, number in self.keep.items():
-                backup_cleanup_args.extend([f'--{interval}', number])
+                backup_cleanup_args.extend([f'--keep-{interval}', number])
             backup_cleanup_args.append(f'--prefix={prefix}-')
             backup_cleanup_args.append(f"{repo}")
             try:
@@ -308,10 +310,6 @@ def borg(command, args, passphrase=None, dryrun=False):
     except CalledProcessError as e:
         logging.error(e)
         raise BackupError()
-
-
-KEEP_FLAGS = ('keep-hourly', 'keep-daily', 'keep-weekly', 'keep-monthly',
-              'keep-yearly')
 
 
 def do_backup(options, cfg, gen_args):
