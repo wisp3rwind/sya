@@ -109,7 +109,6 @@ class PrePostScript():
 
     def __enter__(self):
         if self.nesting_level == 0:
-            self.result = []
             # Exceptions from the pre- and post-scripts are intended to
             # propagate!
             if self.pre:  # don't fail if self.pre == None
@@ -118,7 +117,6 @@ class PrePostScript():
                 for script in self.pre:
                     run_extra_script(script, self.options, name=self.pre_desc)
         self.nesting_level += 1
-        return(self.result)
 
     def __exit__(self, type, value, traceback):
         self.nesting_level -= 1
@@ -130,7 +128,7 @@ class PrePostScript():
                     # Maybe use an environment variable instead?
                     # (BACKUP_STATUS=<borg returncode>)
                     run_extra_script(script, self.options, name=self.post_desc,
-                                     args=self.post_args)
+                                     args=1 if type else 0)
 
 
 class Repository(PrePostScript):
@@ -159,12 +157,6 @@ class Repository(PrePostScript):
                     self.passphrase = f.readline().strip()
             except IOError as e:
                 raise
-
-    def mount(self):
-        self.__enter__()
-
-    def umount(self):
-        self.__exit__()
 
     @property
     def borg_args(self, create=False):
@@ -263,32 +255,31 @@ class Task():
         # run the backup
         try:
             # Load and execute if applicable pre-task commands
-            with self.repo, self.scripts as status:
+            with self.repo, self.scripts:
                 borg('create', backup_args, self.repo.passphrase,
                      options.dryrun)
         except BackupError:
             logging.error(f"'{self.name}' backup failed. You should investigate.")
-            status.append('1')
-        else:
-            status.append('0')
+            raise
 
     def prune(self, cfg, options, gen_opts):
         if self.keep:
-                backup_cleanup_args = list(gen_opts)
-                if cfg['sya']['verbose']:
-                    backup_cleanup_args.append('--list')
-                    backup_cleanup_args.append('--stats')
-                for interval, number in self.keep.items():
-                    backup_cleanup_args.extend([f'--{interval}', number])
-                backup_cleanup_args.append(f'--prefix={prefix}-')
-                backup_cleanup_args.append(f"{repo}")
-                try:
-                    with self.repo, self.scripts:
-                        borg('prune', backup_cleanup_args,
-                             self.repo.passphrase, options.dryrun)
-                except BackupError:
-                    logging.error(f"'{name}' old files cleanup failed. "
-                                  "You should investigate.")
+            backup_cleanup_args = list(gen_opts)
+            if cfg['sya']['verbose']:
+                backup_cleanup_args.append('--list')
+                backup_cleanup_args.append('--stats')
+            for interval, number in self.keep.items():
+                backup_cleanup_args.extend([f'--{interval}', number])
+            backup_cleanup_args.append(f'--prefix={prefix}-')
+            backup_cleanup_args.append(f"{repo}")
+            try:
+                with self.repo, self.scripts:
+                    borg('prune', backup_cleanup_args,
+                         self.repo.passphrase, options.dryrun)
+            except BackupError:
+                logging.error(f"'{name}' old files cleanup failed. "
+                              "You should investigate.")
+                raise
 
 
 def isexec(path):
