@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.6
 #
 # sya, a simple front-end to the borg backup software
 # Copyright (C) 2016 Alexandre Rossi <alexandre.rossi@gmail.com>
@@ -39,7 +39,7 @@ def which(command):
         for binary in os.listdir(d):
             if binary == command:
                 return os.path.join(d, command)
-    sys.exit("%s error: command not found." % command)
+    sys.exit(f"{command} error: command not found.")
 
 
 BINARY = which('borg')
@@ -74,7 +74,7 @@ class ProcessLock(object):
 
 def run(path, args=None, env=None, dryrun=False):
     if dryrun:
-        logging.info("$ %s %s" % (path, ' '.join(args or []), ))
+        logging.info(f"$ {path} {' '.join(args or [])}")
         # print("$ %s %s" % (path, ' '.join(args or []), ))
     else:
         cmdline = [path]
@@ -92,7 +92,7 @@ def run_extra_script(path, options, name="", args=None, env=None, dryrun=False):
                 run(path, args, env, options.dryrun)
             except CalledProcessError as e:
                 if name:
-                    logging.error("%s failed. You should investigate." % name)
+                    logging.error(f"{name} failed. You should investigate.")
                 logging.error(e)
                 raise BackupError()
 
@@ -181,8 +181,8 @@ def isexec(path):
         if os.access(path, os.X_OK):
             return(True)
         else:
-            logging.warn("%s exists, but cannot be executed "
-                         "by the current user." % path)
+            logging.warn(f"{path} exists, but cannot be executed "
+                         "by the current user.")
     return(False)
 
 
@@ -232,8 +232,8 @@ def process_task(options, cfg, name, gen_opts):
 
     # Check if we want to run this backup task
     if not cfg.get('run_this', True):
-        logging.debug("! Task disabled. 'run_this' must be set to 'yes' in %s"
-                      % name)
+        logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
+                      "in {name}")
         return
 
     try:
@@ -251,7 +251,7 @@ def process_task(options, cfg, name, gen_opts):
     if 'includes' in tcfg:
         includes.extend(tcfg['includes'])
     elif 'include-file' not in tcfg:
-        logging.error("'paths' is mandatory in configuration file %s" % name)
+        logging.error(f"'paths' is mandatory in configuration file {name}")
         return
 
     # include and exclude patterns
@@ -274,14 +274,14 @@ def process_task(options, cfg, name, gen_opts):
 
     # Load and execute if applicable pre-task commands
     with PrePostScript(
-            tcfg.get('pre', None), "'%s' pre-backup script" % name,
-            tcfg.get('post', None), "'%s' post-backup script" % name,
+            tcfg.get('pre', None), f"'{name}' pre-backup script",
+            tcfg.get('post', None), f"'{name}' post-backup script",
             options) as status:
         # run the backup
         try:
             borg('create', backup_args, repo.passphrase, options.dryrun)
         except BackupError:
-            logging.error("'%s' backup failed. You should investigate." % name)
+            logging.error(f"'{name}' backup failed. You should investigate.")
             status.append('1')
         else:
             status.append('0')
@@ -294,14 +294,14 @@ def process_task(options, cfg, name, gen_opts):
                 for keep in KEEP_FLAGS:
                     if keep in tcfg:
                         backup_cleanup_args.extend(['--' + keep, tcfg[keep]])
-                backup_cleanup_args.append('--prefix={}-'.format(prefix))
+                backup_cleanup_args.append(f'--prefix={prefix}-')
                 backup_cleanup_args.append(f"{repo}")
                 try:
                     borg('prune', backup_cleanup_args, repo.passphrase,
                          options.dryrun)
                 except BackupError:
-                    logging.error("'%s' old files cleanup failed. You should "
-                                  "investigate." % name)
+                    logging.error(f"'{name}' old files cleanup failed. "
+                                  "You should investigate.")
 
 
 def do_backup(options, cfg, gen_args):
@@ -321,9 +321,9 @@ def do_backup(options, cfg, gen_args):
         # Task loop
         tasks = options.tasks or cfg['tasks']
         for task in tasks:
-            logging.info('-- Backing up using %s configuration...' % task)
+            logging.info(f'-- Backing up using {task} configuration...')
             process_task(options, cfg, task, gen_args)
-            logging.info('-- Done backing up %s.' % task)
+            logging.info(f'-- Done backing up {task}.')
 
     lock.release()
 
@@ -332,7 +332,7 @@ def do_check(options, conffile, gen_opts):
     tasks = options.tasks or cfg['tasks']
     # TODO: do not check repositories repeatedly
     for task in tasks:
-        logging.info('-- Checking using %s configuration...' % task)
+        logging.info(f'-- Checking using {task} configuration...')
         backup_args = list(gen_opts)
         repo = cfg[task]['repository']
         repo = cfg['repositories'][repo]
@@ -340,9 +340,9 @@ def do_check(options, conffile, gen_opts):
         try:
             borg('check', backup_args, repo.passphrase, options.dryrun)
         except BackupError:
-            logging.error("'%s' backup check failed. You should investigate."
-                          % task)
-        logging.info('-- Done checking %s.' % task)
+            logging.error(f"'{task}' backup check failed. You "
+                          "should investigate.")
+        logging.info(f'-- Done checking {task}.')
 
 
 def mount(options, cfg, gen_opts):
@@ -359,9 +359,9 @@ def mount(options, cfg, gen_opts):
     repo = cfg['repositories'][repo]
 
     raise NotImplementedError()
-    logging.info("-- Mounting archive from repository {} with prefix {}..."
-                 "".format(repo.name, prefix))
-    logging.info("-- Selected archive {}".format(""))
+    logging.info(f"-- Mounting archive from repository {repo.name} "
+                 "with prefix {prefix}...")
+    logging.info(f"-- Selected archive {archive}")
     borg_args = list(gen_opts)
     borg_args.append(f"{repo}")
     try:
@@ -369,8 +369,8 @@ def mount(options, cfg, gen_opts):
         # correctness of do_backup.
         borg('mount', borg_args, repo.passphrase, options.dryrun)
     except BackupError:
-        logging.error("'{}:{}' mounting failed. You should investigate."
-                      "".format(repo.name, prefix))
+        logging.error(f"'{repo}:{prefix}' mounting failed. "
+                      "You should investigate.")
     # TODO: is this true?
     logging.info('-- Done mounting. borg has daemonized, manually unmount '
                  'the repo to shut down the FUSE driver.')
@@ -453,7 +453,7 @@ def main():
     logging.basicConfig(format='%(message)s', level=logging.WARNING)
 
     if not os.path.isdir(options.confdir):
-        sys.exit("Configuration directory '%s' not found." % options.confdir)
+        sys.exit("Configuration directory '{options.confdir}' not found.")
 
     with open(os.path.join(options.confdir, DEFAULT_CONFFILE), 'r') as f:
         cfg = yaml.safe_load(f)
