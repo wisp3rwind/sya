@@ -19,6 +19,7 @@
 
 
 from collections import Sequence
+from functools import wraps
 import logging
 import os
 import socket
@@ -26,6 +27,7 @@ import subprocess
 from subprocess import CalledProcessError
 import sys
 
+import click
 import yaml
 
 
@@ -71,38 +73,13 @@ class ProcessLock():
         self.socket.close()
 
 
-def run(path, args=None, env=None, dryrun=False):
-    if dryrun:
-        logging.info(f"$ {path} {' '.join(args or [])}")
-        # print("$ %s %s" % (path, ' '.join(args or []), ))
-    else:
-        cmdline = [path]
-        if args is not None:
-            cmdline.extend(args)
-        subprocess.check_call(cmdline, env=env)
-
-
-def run_extra_script(path, options, name="", args=None, env=None):
-    if path:
-        if not os.path.isabs(path):
-            path = os.path.join(options.confdir, path)
-        if isexec(path):
-            try:
-                run(path, args, env, options.dryrun)
-            except CalledProcessError as e:
-                if name:
-                    logging.error(f"{name} failed. You should investigate.")
-                logging.error(e)
-                raise BackupError()
-
-
 class PrePostScript():
-    def __init__(self, pre, pre_desc, post, post_desc, options):
+    def __init__(self, pre, pre_desc, post, post_desc, borg):
         self.pre = pre
         self.pre_desc = pre_desc
         self.post = post
         self.post_desc = post_desc
-        self.options = options
+        self.borg = borg
 
         self.nesting_level = 0
         self.lazy = False
@@ -124,7 +101,8 @@ class PrePostScript():
                 if not isinstance(self.pre, Sequence):
                     self.pre = [self.pre]
                 for script in self.pre:
-                    run_extra_script(script, self.options, name=self.pre_desc)
+                    self.borg.run_script(script, self.options,
+                                         name=self.pre_desc)
         self.nesting_level += 1
 
     def __exit__(self, type, value, traceback):
@@ -136,13 +114,15 @@ class PrePostScript():
                 for script in self.post:
                     # Maybe use an environment variable instead?
                     # (BACKUP_STATUS=<borg returncode>)
-                    run_extra_script(script, self.options, name=self.post_desc,
-                                     args=1 if type else 0)
+                    self.borg.run_script(script, self.options,
+                                         name=self.post_desc,
+                                         args=1 if type else 0)
 
 
 class Repository(PrePostScript):
-    def __init__(self, cfg, name, options):
+    def __init__(self, cfg, name, options, borg):
         self.name = name
+        self.borg = borg
         cfg = cfg['repositories'][name]
 
         self.path = cfg['path']
@@ -150,7 +130,7 @@ class Repository(PrePostScript):
         super().__init__(
             cfg.get('mount', None), f'Mount script for repository {name}',
             cfg.get('umount', None), f'Unmount script for repository {name}',
-            options
+            borg
         )
 
         self.compression = cfg.get('compression', None)
@@ -160,14 +140,13 @@ class Repository(PrePostScript):
 
         # check if we have a passphrase file
         if passphrase_file:
-            passphrase_file = os.path.join(options.confdir, passphrase_file)
+            passphrase_file = os.path.join(borg.confdir, passphrase_file)
             try:
                 with open(passphrase_file) as f:
                     self.passphrase = f.readline().strip()
             except IOError as e:
                 raise InvalidConfigurationError()
 
-    @property
     def borg_args(self, create=False):
         args = []
         if self.remote_path:
@@ -178,11 +157,18 @@ class Repository(PrePostScript):
 
         return(args)
 
-    def check(self, options, borg):
-        backup_args = []
-        backup_args.append(f"{self}")
+    def borg_env(self):
+        env = {}
+        if self.passphrase:
+            env['BORG_PASSPHRASE'] = self.passphrase
+
+        return(env)
+
+    def check(self, borg):
+        args = self.borg_args()
+        args.append(f"{self}")
         try:
-            borg('check', backup_args, self.passphrase, options.dryrun)
+            self.borg('check', args, self)
         except BackupError:
             logging.error(f"'{self.name}' backup check failed. You "
                           "should investigate.")
@@ -201,15 +187,16 @@ class InvalidConfigurationError(Exception):
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
-    def __init__(self, cfg, name, options):
+    def __init__(self, cfg, name, borg):
         try:
             self.name = name
+            self.borg = borg
             tcfg = cfg['tasks'][name]
 
             if 'repository' not in tcfg:
                 raise InvalidConfigurationError("'repository' is mandatory "
                                                 "for each task in config")
-            self.repo = cfg['repositories'][tcfg['repository']]
+            self.repo = borg.repos[tcfg['repository']]
 
             self.enabled = tcfg.get('run_this', True)
             self.keep = tcfg.get('keep', {})
@@ -223,19 +210,22 @@ class Task():
                 raise InvalidConfigurationError(f"'paths' is mandatory in "
                                                 "configuration file {name}")
             if self.include_file:
-                self.include_file = os.path.join(options.confdir,
+                self.include_file = os.path.join(borg.confdir,
                                                  self.include_file)
             if self.exclude_file:
-                self.exclude_file = os.path.join(options.confdir,
+                self.exclude_file = os.path.join(borg.confdir,
                                                  self.exclude_file)
             self.scripts = PrePostScript(
                 tcfg.get('pre', None), f"'{name}' pre-backup script",
                 tcfg.get('post', None), f"'{name}' post-backup script",
-                options)
+                borg)
         except (KeyError, ValueError, TypeError) as e:
             raise InvalidConfigurationError(str(e))
 
         self.lazy = False
+
+    def __str__(self):
+        return(self.name)
 
     def __call__(self, *, lazy=False):
         self.lazy = True
@@ -250,25 +240,22 @@ class Task():
         self.repo.__exit__(*exc)
         self.scripts.__exit__(*exc)
 
-    def backup(self, cfg, options, borg):
+    def backup(self, progress):
         # Check if we want to run this backup task
         if not self.enabled:
             logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
                           "in {name}")
             return
 
-        backup_args = []
+        args = self.repo.borg_args(create=True)
 
-        if cfg['sya']['verbose']:
-            backup_args.append('--stats')
+        if self.borg.verbose:
+            args.append('--stats')
 
-        if options.progress:
-            backup_args.append('--progress')
+        if progress:
+            args.append('--progress')
 
-        backup_args.append(
-            f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
-
-        backup_args.extend(self.repo.borg_args(create=True))
+        args.append(f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
 
         # include and exclude patterns
         includes = self.includes[:]
@@ -286,34 +273,31 @@ class Task():
                 excludes.extend(f.readlines())
 
         for exclude in excludes:
-            backup_args.extend(['--exclude', exclude.strip()])
-        backup_args.extend(i.strip() for i in includes)
+            args.extend(['--exclude', exclude.strip()])
+        args.extend(i.strip() for i in includes)
 
         # run the backup
         try:
             # Load and execute if applicable pre-task commands
             with self:
-                borg('create', backup_args, self.repo.passphrase,
-                     options.dryrun)
+                self.borg('create', args, self.repo)
         except BackupError:
             logging.error(f"'{self.name}' backup failed. "
                           "You should investigate.")
             raise
 
-    def prune(self, cfg, options, borg):
+    def prune(self):
         if self.keep:
-            backup_cleanup_args = []
-            if cfg['sya']['verbose']:
-                backup_cleanup_args.append('--list')
-                backup_cleanup_args.append('--stats')
+            args = []
+            if self.borg.verbose:
+                args.extend(['--list', '--stats'])
             for interval, number in self.keep.items():
-                backup_cleanup_args.extend([f'--keep-{interval}', number])
-            backup_cleanup_args.append(f'--prefix={self.prefix}-')
-            backup_cleanup_args.append(f"{self.repo}")
+                args.extend([f'--keep-{interval}', number])
+            args.append(f'--prefix={self.prefix}-')
+            args.append(f"{self.repo}")
             try:
                 with self:
-                    borg('prune', backup_cleanup_args,
-                         self.repo.passphrase, options.dryrun)
+                    self.borg('prune', args, self.repo)
             except BackupError:
                 logging.error(f"'{self.name}' old files cleanup failed. "
                               "You should investigate.")
@@ -335,28 +319,65 @@ class BackupError(Exception):
 
 
 class Borg():
-    def __init__(self, verbose, dryrun):
+    """Encapsulate all information related to running external tools.
+    """
+    def __init__(self, confdir, dryrun, verbose):
+        self.confdir = confdir
+        self.dryrun = dryrun
         self.verbose = verbose
-        self.dryrun = dryun
 
-    def __call__(self, command, args, passphrase=None):
-        if passphrase:
-            env = {'BORG_PASSPHRASE': passphrase, }
+    def _run(self, path, args=None, env=None):
+        if self.dryrun:
+            logging.info(f"$ {path} {' '.join(args or [])}")
+            # print("$ %s %s" % (path, ' '.join(args or []), ))
         else:
-            env = None
+            cmdline = [path]
+            if args is not None:
+                cmdline.extend(args)
+            subprocess.check_call(cmdline, env=env)
+
+    def run_script(self, path, name="", args=None, env=None):
+        if path:
+            if not os.path.isabs(path):
+                path = os.path.join(self.confdir, path)
+            if isexec(path):
+                try:
+                    self._run(path, args, env)
+                except CalledProcessError as e:
+                    if name:
+                        logging.error(f"{name} failed. You should investigate.")
+                    logging.error(e)
+                    raise BackupError()
+
+    def __call__(self, command, args, repo):
+        env = repo.borg_env() or None
 
         if self.verbose:
             args.insert(0, '--verbose')
         args.insert(0, command)
         try:
-            run(BINARY, args, env=env, dryrun=self.dryrun)
+            self._run(BINARY, args, env=env)
         except CalledProcessError as e:
             logging.error(e)
             raise BackupError()
 
 
-def create(options, cfg, borg):
-    lock = ProcessLock('sya' + options.confdir)
+def pass_object(f):
+    @wraps(f)
+    @click.pass_context
+    def wrapper(ctx, *args, **kwargs):
+        return ctx.invoke(f, ctx.obj, *args, **kwargs)
+    return(wrapper)
+
+
+@main.command(help="Do a backup run.")
+@click.option('-p', '--progress/--no-progress',
+              help="Show progress.")
+@click.argument('tasks', nargs=-1,
+                help="Tasks to run, default is all.")
+@pass_object
+def create(progress, tasks, borg):
+    lock = ProcessLock('sya' + borg.confdir)
     try:
         lock.acquire()
     except LockInUse:
@@ -364,46 +385,77 @@ def create(options, cfg, borg):
                       'on the same conf dir.')
         sys.exit(1)
 
-    # Wrap in global 'pre' and 'post' scripts if they exists
-    with PrePostScript(
-            cfg['sya'].get('pre', None), "Global pre script",
-            cfg['sya'].get('post', None), "Global post script",
-            options):
-        # Task loop
-        tasks = options.tasks or cfg['tasks']
-        for task in tasks:
-            task = cfg['tasks'][task]
-            logging.info(f'-- Backing up using {task} configuration...')
-            with task(lazy=True):
-                task.backup(cfg, options, borg)
-                task.prune(cfg, options, borg)
-            logging.info(f'-- Done backing up {task}.')
+    for task in (tasks or borg.tasks):
+        task = borg.tasks[task]
+        logging.info(f'-- Backing up using {task} configuration...')
+        with task(lazy=True):
+            task.backup(progress)
+            task.prune()
+        logging.info(f'-- Done backing up {task}.')
 
     lock.release()
 
 
-    tasks = options.tasks or cfg['tasks']
-    repos = set(cfg['tasks'][task].repo for task in tasks)
-def check(ctx, progress, repo, items):
+@main.command(help="Perform a check for repository consistency.")
+@click.option('-p', '--progress/--no-progress',
+              help="Show progress.")
+@click.option('-r/-t', '--repo/--task', 'repo', default=False,
+              help="Whether to directly name repositories to check or select "
+                   "them from tasks.")
+@click.argument('items', nargs='*',
+                help="Repositories resp. tasks to select repositories from, "
+                     "default is all")
+@click.pass_object
+def check(progress, repo, items, borg):
+    if repo:
+        repos = items or borg.repos
+    else:
+        tasks = items or borg.tasks
+        repos = set(borg.tasks[t].repo for t in tasks)
 
     for repo in repos:
         logging.info(f'-- Checking repository {repo.name}...')
-        repo.check(options, gen_opts)
+        repo.check()
         logging.info(f'-- Done checking {repo.name}.')
 
 
-def mount(options, cfg, borg):
-    repo = None
-    prefix = None
-    if options.task:
-        repo = cfg['tasks'][options.task]['repository']
-        prefix = cfg['tasks'][options.task]['prefix']
-    if options.repo:
-        repo = options.repo.rstrip('^')
-    if options.prefix:
-        prefix = options.prefix.rstrip('^')
+@main.command(help="Mount a snapshot.")
+# --repo name[^[^ ...]] -> repo
+# --repo name::prefix^^ -> repo, prefix
+# --task name[^[^ ...]] -> repo, prefix
+# --before=2017-02-01T12:45:10
+@click.option(
+    '-r/-t', '--repo/--task', 'repo',
+    help="Whether to select archives for a repository or task. "
+         "narrowed down further by specifying '--prefix'. "
+         "Optionally append an arbitrary number of '^' to choose the "
+         "next-to last or earlier archives.")
+@click.option('--umask', default=None,
+              help="Set umask when mounting")
+# TODO: --daemon choice
+# TODO: it IS possible to mount a whole archive
+@click.option('-f', '--foreground/--background',
+              help="Whether to stay in the foreground or daemonize")
+@click.argument('item', required=True,
+                help="The repository or task. If a repository, a prefix can "
+                     "be speified as 'repo::prefix'. Optionally append an "
+                     "arbitrary number of '^' to choose the last, next-to "
+                     "last or earlier archives. Otherwise, all matching "
+                     "archives will be mounted.")
+@click.argument('mountpoint', required=True,
+                help="The mountpoint.")
+@pass_object
+def mount(repo, prefix, umask, foreground, item, mountpoint, borg):
+    index = len(item)
+    item = item.rstrip('^')
+    index = index - len(item)
 
-    repo = cfg['repositories'][repo]
+    if repo:
+        repo, _, prefix = item.partition('::')
+        repo = borg.repos[item]
+    else:
+        repo = borg.tasks[item].repo
+        prefix = borg.tasks[item].prefix
 
     raise NotImplementedError()
     logging.info(f"-- Mounting archive from repository {repo.name} "
@@ -414,119 +466,54 @@ def mount(options, cfg, borg):
     try:
         # TODO: proper passphrase/key support. Same for do_check, verify
         # correctness of do_backup.
-        borg('mount', borg_args, repo.passphrase, options.dryrun)
+        borg('mount', borg_args, repo.passphrase)
     except BackupError:
         logging.error(f"'{repo}:{prefix}' mounting failed. "
                       "You should investigate.")
+        raise
     # TODO: is this true?
     logging.info('-- Done mounting. borg has daemonized, manually unmount '
                  'the repo to shut down the FUSE driver.')
 
 
-def main():
-    p = argparse.ArgumentParser(allow_abbrev=False)
-    p.add_argument(
-        '-d', '--config-dir', dest='confdir', default=DEFAULT_CONFDIR,
-        help="Configuration directory, default is {}".format(DEFAULT_CONFDIR))
-    p.add_argument(
-        '-n', '--dry-run', action='store_true', dest='dryrun',
-        help="Do not run backup, don't act.")
-    p.add_argument(
-        '-v', '--verbose', action='store_true',
-        help="Be verbose and print stats.")
 
-    sp = p.add_subparsers()
 
-    pcreate = sp.add_parser('create', help="Do a backup run.")
-    pcreate.set_defaults(func=do_backup)
-    pcreate.add_argument(
-        '-p', '--progress', action='store_true',
-        help="Show progress.")
-    pcreate.add_argument(
-        'tasks', nargs='*',
-        help="Tasks to run, default is all.")
 
-    pcheck = sp.add_parser('check',
-                           help="Perform a check for repository consistency.")
-    pcheck.set_defaults(func=do_check)
-    pcheck.add_argument(
-        '-p', '--progress', action='store_true',
-        help="Show progress.")
-    pcheck.add_argument(
-        '-r', '--repo', action='store_true',
-        help="Directly name repositories to check instead of selecting "
-             "them from tasks.")
-    pcheck.add_argument(
-        'tasks', nargs='*',
-        help="Tasks to select repositories from, default is all. If '-r' "
-             "is given, name repositories instead of tasks.")
 
-    pmount = sp.add_parser('mount', help="Mount a snapshot.")
-    pmount.set_defaults(func=mount)
-    # --repo name[^[^ ...]] -> repo
-    # --task name[^[^ ...]] -> repo, prefix
-    # --before=2017-02-01T12:45:10
-    grselect = pmount.add_mutually_exclusive_group(required=True)
-    grselect.add_argument(
-        '-r', '--repo', default=None,
-        help="Select the last archive in the given repository, this may be "
-             "narrowed down further by specifying '--prefix'. "
-             "Optionally append an arbitrary number of '^' to choose the "
-             "next-to last or earlier archives.")
-    grselect.add_argument(
-        '-t', '--task', default=None,
-        help="Select the last archive for the task (i.e. repository "
-             "and prefix). Optionally append an arbitrary number of '^' "
-             "to choose the next-to last or earlier archives.")
-    pmount.add_argument(
-        '-p', '--prefix', default=None,
-        help="Narrow down the selection by matching the prefix.")
-    pmount.add_argument(
-        '--umask', default=None,
-        help="Set umask when mounting")
-    # TODO: --daemon choice
-    # TODO: it IS possible to mount a whole archive
-    pmount.add_argument(
-        '-f', '--foreground', action='store_true',
-        help="Whether to stay in the foreground or daemonize")
-    pmount.add_argument(
-        'mountpoint', nargs=1,
-        help="The mountpoint.")
 
-    options = p.parse_args()
-
+@click.group()
+@click.option('-d', '--config-dir', 'confdir',
+              default=DEFAULT_CONFDIR,
+              help="Configuration directory, default is {DEFAULT_CONFDIR}")
+@click.option('-n', '--dry-run', 'dryrun', is_flag=True,
+              help="Do not run backup, don't act.")
+@click.option('-v', '--verbose', is_flag=True,
+              help="Be verbose and print stats.")
+def main(confdir, dryrun, verbose):
     logging.basicConfig(format='%(message)s', level=logging.WARNING)
 
-    if not os.path.isdir(options.confdir):
-        sys.exit("Configuration directory '{options.confdir}' not found.")
+    if not os.path.isdir(confdir):
+        sys.exit(f"Configuration directory '{confdir}' not found.")
 
-    with open(os.path.join(options.confdir, DEFAULT_CONFFILE), 'r') as f:
+    with open(os.path.join(DEFAULT_CONFFILE), 'r') as f:
         cfg = yaml.safe_load(f)
-
-    # Parse configuration into corresponding classes.
-    for repo in cfg['repositories']:
-        cfg['repositories'][repo] = Repository(cfg, cfg['repositories'][repo],
-                                               options)
-    for task in cfg['tasks']:
-        cfg['tasks'][task] = Task(cfg, cfg['tasks'][task], options)
 
     # TODO: proper validation of the config file
     if 'verbose' in cfg['sya']:
         assert(isinstance(cfg['sya']['verbose'], bool))
-    if options.verbose:
-        cfg['sya']['verbose'] = options.verbose
-        del options.verbose
-    if cfg['sya']['verbose'].get(bool):
+        verbose = verbose or cfg['sya']['verbose']
+    if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    borg = Borg(cfg['sya']['verbose'], options.dryrun)
+    # Object to hold all global state.
+    borg = Borg(confdir, dryrun, verbose)
 
-    options.func(options, cfg, borg)
+    # Parse configuration into corresponding classes.
+    borg.repos = {repo: Repository(cfg, cfg['repositories'][repo], borg)
+                  for repo in cfg['repositories']}
+    borg.tasks = {task: Task(cfg, cfg['tasks'][task], borg)
+                  for task in cfg['tasks']}
 
     logging.shutdown()
-
-
-if __name__ == '__main__':
-    main()
 
 # vim: ts=4 sw=4 expandtab
