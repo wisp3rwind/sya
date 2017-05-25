@@ -20,6 +20,7 @@
 
 import sys
 import os
+from collections import Sequence
 from contextlib import contextmanager
 import logging
 import argparse
@@ -97,24 +98,32 @@ def run_extra_script(path, options, name="", args=None, env=None, dryrun=False):
 
 
 class PrePostScript():
-    def __init__(self, pre_path, pre_name, post_path, post_name, options):
-        self.pre_path = pre_path
-        self.pre_name = pre_name
-        self.post_path = post_path
-        self.post_name = post_name
+    def __init__(self, pre, pre_desc, post, post_desc, options):
+        self.pre = pre
+        self.pre_desc = pre_desc
+        self.post = post
+        self.post_desc = post_desc
         self.options = options
 
     def __enter__(self):
         self.result = []
         # Exceptions from the pre- and post-scripts are intended to propagate!
-        run_extra_script(self.pre_path, self.options, name=self.pre_name)
+        if self.pre:  # don't fail if self.pre == None
+            if not isinstance(self.pre, Sequence):
+                self.pre = [self.pre]
+            for script in self.pre:
+                run_extra_script(script, self.options, name=self.pre_desc)
         return(self.result)
 
     def __exit__(self, type, value, traceback):
         # Maybe use an environment variable instead?
         # (BACKUP_STATUS=<borg returncode>)
-        run_extra_script(self.post_path, self.options, name=self.post_name,
-                         args=self.post_args)
+        if self.post:  # don't fail if self.post == None
+            if not isinstance(self.post, Sequence):
+                self.post = [self.post]
+            for script in self.post:
+                run_extra_script(script, self.options, name=self.post_desc,
+                                 args=self.post_args)
 
 
 def isexec(path):
