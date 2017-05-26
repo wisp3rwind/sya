@@ -9,7 +9,9 @@ setup(name='borg_sya',
       use_scm_version=True,
       setup_requires=['setuptools_scm'],
 
-      install_requires=['borgbackup'],
+      install_requires=['borgbackup',
+                        'click',
+                        'pyyaml'],
 
       packages=['borg_sya'],
       entry_points={
