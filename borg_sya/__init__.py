@@ -132,10 +132,9 @@ class Borg():
 
 
 class Repository(PrePostScript):
-    def __init__(self, cfg, name, borg):
+    def __init__(self, name, cfg, borg):
         self.name = name
         self.borg = borg
-        cfg = cfg['repositories'][name]
 
         self.path = cfg['path']
 
@@ -195,25 +194,24 @@ class Repository(PrePostScript):
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
-    def __init__(self, cfg, name, borg):
+    def __init__(self, name, cfg, borg):
         try:
             self.name = name
             self.borg = borg
-            tcfg = cfg['tasks'][name]
 
-            if 'repository' not in tcfg:
+            if 'repository' not in cfg:
                 raise InvalidConfigurationError("'repository' is mandatory "
                                                 "for each task in config")
-            self.repo = borg.repos[tcfg['repository']]
+            self.repo = borg.repos[cfg['repository']]
 
-            self.enabled = tcfg.get('run_this', True)
-            self.keep = tcfg.get('keep', {})
+            self.enabled = cfg.get('run_this', True)
+            self.keep = cfg.get('keep', {})
             if not all(k in self.KEEP_INTERVALS for k in self.keep):
                 raise InvalidConfigurationError()
-            self.prefix = tcfg.get('prefix', '{hostname}')
-            self.include_file = tcfg.get('include_file', None)
-            self.exclude_file = tcfg.get('exclude_file', None)
-            self.includes = tcfg.get('includes', [])
+            self.prefix = cfg.get('prefix', '{hostname}')
+            self.include_file = cfg.get('include_file', None)
+            self.exclude_file = cfg.get('exclude_file', None)
+            self.includes = cfg.get('includes', [])
             if not self.includes and not self.include_file:
                 raise InvalidConfigurationError(f"'paths' is mandatory in "
                                                 "configuration file {name}")
@@ -224,8 +222,8 @@ class Task():
                 self.exclude_file = os.path.join(borg.confdir,
                                                  self.exclude_file)
             self.scripts = PrePostScript(
-                tcfg.get('pre', None), f"'{name}' pre-backup script",
-                tcfg.get('post', None), f"'{name}' post-backup script",
+                cfg.get('pre', None), f"'{name}' pre-backup script",
+                cfg.get('post', None), f"'{name}' post-backup script",
                 borg)
         except (KeyError, ValueError, TypeError) as e:
             raise InvalidConfigurationError(str(e))
@@ -345,10 +343,10 @@ def main(ctx, confdir, dryrun, verbose):
     borg = Borg(confdir, dryrun, verbose)
 
     # Parse configuration into corresponding classes.
-    borg.repos = {repo: Repository(cfg, repo, borg)
-                  for repo in cfg['repositories']}
-    borg.tasks = {task: Task(cfg, task, borg)
-                  for task in cfg['tasks']}
+    borg.repos = {repo: Repository(repo, rcfg, borg)
+                  for repo, rcfg in cfg['repositories'].items()}
+    borg.tasks = {task: Task(task, tcfg, borg)
+                  for task, tcfg in cfg['tasks'].items()}
 
     ctx.obj = borg
 
