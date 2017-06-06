@@ -44,3 +44,38 @@ class ProcessLock():
 
     def release(self):
         self.socket.close()
+
+
+class LazyReentrantContextmanager():
+    def __init__(self):
+        self.nesting_level = 0
+        self.lazy = False
+        self.entered = False
+
+    def __call__(self, *, lazy=False):
+        self.lazy = True
+        return(self)
+
+    def _enter(self):
+        raise NotImplementedError()
+
+    def _exit(self, type, value, traceback):
+        raise NotImplementedError()
+
+    def __enter__(self):
+        if self.lazy:
+            # Only actually enter at the next invocation. This still increments
+            # the nesting_level so that cleanup will nevertheless occur at this
+            # outer level.
+            self.lazy = False
+        elif not self.entered:
+            self._enter()
+            self.entered = True
+        self.nesting_level += 1
+
+    def __exit__(self, type, value, traceback):
+        self.nesting_level -= 1
+        if self.nesting_level == 0:
+            self._exit(type, value, traceback)
+        self.entered = False
+

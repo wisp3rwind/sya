@@ -35,7 +35,9 @@ import sys
 import click
 import yaml
 
-from util import which, isexec, LockInUse, ProcessLock
+from util import (which, isexec,
+                  LockInUse, ProcessLock,
+                  LazyReentrantContextmanager)
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config.yaml'
@@ -55,21 +57,15 @@ class BackupError(Exception):
     pass
 
 
-class PrePostScript():
+class PrePostScript(LazyReentrantContextmanager):
     def __init__(self, pre, pre_desc, post, post_desc, borg):
+        super().__init__()
+
         self.pre = pre
         self.pre_desc = pre_desc
         self.post = post
         self.post_desc = post_desc
         self.borg = borg
-
-        self.nesting_level = 0
-        self.lazy = False
-        self.entered = False
-
-    def __call__(self, *, lazy=False):
-        self.lazy = True
-        return(self)
 
     def _enter(self):
         # Exceptions from the pre- and post-scripts are intended to
@@ -89,23 +85,6 @@ class PrePostScript():
                 # (BACKUP_STATUS=<borg returncode>)
                 self.borg.run_script(script, self.post_desc,
                                      args=[str(1 if type else 0)])
-
-    def __enter__(self):
-        if self.lazy:
-            # Only actually enter at the next invocation. This still increments
-            # the nesting_level so that cleanup will nevertheless occur at this
-            # outer level.
-            self.lazy = False
-        elif not self.entered:
-            self._enter()
-            self.entered = True
-        self.nesting_level += 1
-
-    def __exit__(self, type, value, traceback):
-        self.nesting_level -= 1
-        if self.nesting_level == 0:
-            self._exit(type, value, traceback)
-        self.entered = False
 
 
 class Borg():
