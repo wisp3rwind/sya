@@ -28,9 +28,8 @@
 
 import logging
 import os
-import socket
 import subprocess
-from subprocess import CalledProcessError, Popen
+from subprocess import Popen
 import sys
 
 import click
@@ -72,6 +71,25 @@ class PrePostScript():
         self.lazy = True
         return(self)
 
+    def _enter(self):
+        # Exceptions from the pre- and post-scripts are intended to
+        # propagate!
+        if self.pre:  # don't fail if self.pre == None
+            if isinstance(self.pre, str):
+                self.pre = [self.pre]
+            for script in self.pre:
+                self.borg.run_script(script, self.pre_desc)
+
+    def _exit(self, type, value, traceback):
+        if self.post:  # don't fail if self.post == None
+            if isinstance(self.post, str):
+                self.post = [self.post]
+            for script in self.post:
+                # Maybe use an environment variable instead?
+                # (BACKUP_STATUS=<borg returncode>)
+                self.borg.run_script(script, self.post_desc,
+                                     args=[str(1 if type else 0)])
+
     def __enter__(self):
         if self.lazy:
             # Only actually enter at the next invocation. This still increments
@@ -79,27 +97,14 @@ class PrePostScript():
             # outer level.
             self.lazy = False
         elif not self.entered:
-            # Exceptions from the pre- and post-scripts are intended to
-            # propagate!
-            if self.pre:  # don't fail if self.pre == None
-                if isinstance(self.pre, str):
-                    self.pre = [self.pre]
-                for script in self.pre:
-                    self.borg.run_script(script, self.pre_desc)
+            self._enter()
             self.entered = True
         self.nesting_level += 1
 
     def __exit__(self, type, value, traceback):
         self.nesting_level -= 1
         if self.nesting_level == 0:
-            if self.post:  # don't fail if self.post == None
-                if isinstance(self.post, str):
-                    self.post = [self.post]
-                for script in self.post:
-                    # Maybe use an environment variable instead?
-                    # (BACKUP_STATUS=<borg returncode>)
-                    self.borg.run_script(script, self.post_desc,
-                                         args=[str(1 if type else 0)])
+            self._exit(type, value, traceback)
         self.entered = False
 
 
