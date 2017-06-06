@@ -2,6 +2,9 @@ import os
 import socket
 import subprocess
 from subprocess import CalledProcessError
+from yaml import YAMLObject, add_path_resolver
+from yaml.loader import SafeLoader
+from yaml.nodes import ScalarNode, MappingNode, SequenceNode
 
 
 def which(command):
@@ -87,25 +90,75 @@ class LazyReentrantContextmanager():
             self.entered = False
 
 
-class ShellScript(yaml.YAMLObject):
-    """A YAML object with tag `!sh` that reads a scalar node and returns a
-    callable that executes the node's text through `subprocess` with
-    `shell=True`.
+class Script(YAMLObject):
+    """A YAML object with a tag to be set by subclasses that reads a scalar
+    node and returns a callable that executes the node's text.
     """
-    yaml_tag = '!sh'
+
+    yaml_loader = SafeLoader
+
+    def __init__(self, script):
+        self.script = script
+
+    def __call__(self):
+        raise NotImplementedError()
 
     @classmethod
     def from_yaml(cls, loader, node):
-        script = node  # ??????????????????
-
-        def func():
-            try:
-                subprocess.check_output(script, shell=True,
-                                        stderr=subprocess.STDOUT)
-            except CalledProcessError as e:
-                raise
-        return(func)
+        """Load a scalar (i.e. a string if the configuration file is valid)
+        """
+        script = loader.construct_scalar(node)
+        return(cls(script))
 
     @classmethod
     def to_yaml(cls, dumper, data):
         raise NotImplementedError()
+
+    def __str__(self):
+        return(f"{self.__class__.__name__}(\n'{self.script}')")
+
+
+class ExternalScript(Script):
+    """
+    """
+    yaml_tag = '!external_script'
+
+    def __call__(self):
+        subprocess.check_call(self.script, stderr=subprocess.STDOUT)
+
+
+class ShellScript(Script):
+    """
+    """
+    yaml_tag = '!sh'
+
+    def __call__(self):
+        subprocess.check_output(self.script, shell=True,
+                                stderr=subprocess.STDOUT)
+
+
+class PythonScript(Script):
+    """
+    """
+    yaml_tag = '!python'
+
+    def __call__(self):
+        try:
+            exec(self.script)
+        except CalledProcessError as e:
+            raise
+
+
+seq = [(SequenceNode, None)]
+for a, b in [('tasks', 'pre'),
+             ('tasks', 'post'),
+             ('repositories', 'mount'),
+             ('repositories', 'umount')]:
+    path = [(MappingNode, a),
+            (MappingNode, None),  # name
+            (MappingNode, b),
+            ]
+    add_path_resolver('!external_script', path, ScalarNode,
+                      Loader=SafeLoader)
+    add_path_resolver('!external_script', path + seq, ScalarNode,
+                      Loader=SafeLoader)
