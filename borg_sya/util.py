@@ -32,6 +32,12 @@ class ProcessLock():
     def __init__(self, process_name):
         self.pname = process_name
 
+    def __enter__(self):
+        self.acquire()
+
+    def __exit__(self, type, value, traceback):
+        self.release()
+
     def acquire(self):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         try:
