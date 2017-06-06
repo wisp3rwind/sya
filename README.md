@@ -1,19 +1,19 @@
-# Sya
+# Overview
 
-Sya is a very basic frontend to [`borg`][1]. Its goal is to
-provide easy management of multiple independant backup tasks.
+[`Sya`][2] is a very basic frontend to [`borg`][1]. Its goal is to
+provide easy management of multiple independent backup tasks.
+Basically, it constructs `borg` commandlines from repository and task
+specifications given in a configuration file.
+
+While this started as a fork of @niol's tool, there's essentially no
+compatibility to his original version and almost all of the code has seen
+significant changes:
+* The configuration file is YAML instead of INI
+* and the commandline interface is entirely different (subcommands, etc.)
 
  [1]: https://borgbackup.readthedocs.io/
+ [2]: https://github.com/niol/sya
 
-## Overview
-
-`borg` is a deduplicating backup program supporting encryption. A repository
-contains archives which may refer to multiple machine being backed up or
-multiple backups going back in time of the same machine, or a mix of both.
-
-`sya` is a script aimed at easing the management of backup jobs. It is a basic
-frontend to the `borg` command line. It consists of the main script and a
-configuration directory containing a main config file and additional elements.
 
 ## Configuration
 
@@ -101,14 +101,13 @@ Example `pre.sh` :
 
 ## Installation (short)
 
-`sya` may run in any directory, but it was made to be run in the following
-way :
+`sya` is a python package, as such the easiest way to install it is through
+`pip`. The package also includes the example configuration file. There's
+also an Arch PKGBUILD at (???).
 
-* Create the directory `/etc/sya` and config files.
-* Drop the `sya` script in a `cron` directory if applicable, for example on
-  Debian, I dropped it in `/etc/cron.daily` to make it run once a day. After
-  a couple of days, you may want to put `verbose = False` in the config file
-  to stop getting cron report emails.
+I automate backups through `systemd` timers and services, corresponding example
+files are also included. It should be straightforward to run `sya` through
+cron, `too`, but I haven't done that.
 
 ## Installation (my setup)
 
@@ -308,3 +307,19 @@ from your import of the rdiff-backup data will be deduplicated:
                         Unique chunks         Total chunks
     Chunk index:                   63868               144211
     ------------------------------------------------------------------------------
+
+
+# Similar Tools (a.k.a. inspiration for new features)
+* [`borg-gtk`][borg-gtk]: GUI, JSON interface
+* [`borgcube`][borgcube]
+* [`borgjs`][borgjs]
+* [`borg-web`][borg-web]
+* [`borg_notifications_multi_target`][borg_notifications_multi_target] https://github.com/vesparny/borgjs
+* [`borg-notify`][borg-notify] Desktop notifications
+
+ [borg-gtk]: https://github.com/Abogical/borg-gtk
+ [borgcube]: https://github.com/enkore/borgcube
+ [borgjs]: https://github.com/vesparny/borgjs
+ [borg-web]: https://github.com/borgbackup/borgweb
+ [borg_notifications_multi_target]: https://github.com/lhupfeldt/borg_notifications_multi_target
+ [borg-notify]: https://github.com/PhrozenByte/borg-notify
