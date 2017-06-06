@@ -17,6 +17,14 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+# TODO: include example services in the package
+# TODO: Consider using confuse since it has config overlays. Default config
+#       appears to be weird, though.
+# TODO: add a safeguard to never run borg commands from without the context
+#       managers.
+# TODO: different levels of verbosity
+# TODO: Use colorama
+
 
 import logging
 import os
