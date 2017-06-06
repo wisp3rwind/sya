@@ -24,6 +24,8 @@
 #       managers.
 # TODO: different levels of verbosity
 # TODO: Use colorama
+# TODO: Bypass main() when doing `borg-sya {create|check|...} --help` in order
+#       not to crash on broken configs
 
 
 from functools import wraps
@@ -36,9 +38,9 @@ import sys
 import click
 import yaml
 
-from util import (which, isexec,
-                  LockInUse, ProcessLock,
-                  LazyReentrantContextmanager)
+from .util import (which, isexec,
+                   LockInUse, ProcessLock,
+                   LazyReentrantContextmanager)
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config.yaml'
@@ -104,6 +106,7 @@ class Borg():
             cmdline = [path]
             if args is not None:
                 cmdline.extend(args)
+            # print(cmdline, env)
             p = Popen(cmdline, env=env, stderr=subprocess.PIPE)
             _, err = p.communicate()
             # sys.stderr.write(err)
@@ -120,8 +123,8 @@ class Borg():
                 if isexec(path):
                     self._run(path, args, env)
                 else:
-                    logging.warn(f"{path} exists, but cannot be executed "
-                                 "by the current user.")
+                    raise BackupError(f"{path} exists, but cannot be executed "
+                                      f"by the current user.")
 
     def __call__(self, command, args, repo):
         assert(repo.entered)
@@ -177,11 +180,12 @@ class Repository(PrePostScript):
 
         return(env)
 
-    def check(self, borg):
+    def check(self):
         args = self.borg_args()
         args.append(f"{self}")
         try:
-            self.borg('check', args, self)
+            with self:
+                self.borg('check', args, self)
         except BackupError:
             logging.error(f"'{self.name}' backup check failed. You "
                           "should investigate.")
@@ -250,7 +254,7 @@ class Task():
         return(self.name)
 
     def __call__(self, *, lazy=False):
-        self.lazy = True
+        self.lazy = lazy
         return(self)
 
     @if_enabled
@@ -261,8 +265,8 @@ class Task():
 
     @if_enabled
     def __exit__(self, *exc):
-        self.repo.__exit__(*exc)
         self.scripts.__exit__(*exc)
+        self.repo.__exit__(*exc)
 
     @if_enabled
     def backup(self, progress):
@@ -312,7 +316,7 @@ class Task():
             if self.borg.verbose:
                 args.extend(['--list', '--stats'])
             for interval, number in self.keep.items():
-                args.extend([f'--keep-{interval}', number])
+                args.extend([f'--keep-{interval}', str(number)])
             args.append(f'--prefix={self.prefix}-')
             args.append(f"{self.repo}")
             try:
@@ -405,9 +409,11 @@ def create(borg, progress, tasks):
 def check(borg, progress, repo, items):
     if repo:
         repos = items or borg.repos
+        repos = [borg.repos[r] for r in repos]
     else:
         tasks = items or borg.tasks
-        repos = set(borg.tasks[t].repo for t in tasks if t.enabled)
+        tasks = [borg.tasks[t] for t in tasks]
+        repos = set(t.repo for t in tasks if t.enabled)
 
     for repo in repos:
         logging.info(f'-- Checking repository {repo.name}...')

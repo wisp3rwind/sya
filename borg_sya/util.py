@@ -1,6 +1,5 @@
 import os
 import socket
-import sys
 
 
 def which(command):
@@ -16,7 +15,7 @@ def which(command):
 
 def isexec(path):
     if os.path.isfile(path):
-        return os.access(path, os.X_OK):
+        return os.access(path, os.X_OK)
 
 
 class LockInUse(Exception):
@@ -59,7 +58,7 @@ class LazyReentrantContextmanager():
         self.entered = False
 
     def __call__(self, *, lazy=False):
-        self.lazy = True
+        self.lazy = lazy
         return(self)
 
     def _enter(self):
@@ -81,7 +80,7 @@ class LazyReentrantContextmanager():
 
     def __exit__(self, type, value, traceback):
         self.nesting_level -= 1
-        if self.nesting_level == 0:
+        if self.entered and self.nesting_level == 0:
             self._exit(type, value, traceback)
             self.entered = False
 
