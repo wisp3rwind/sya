@@ -77,5 +77,5 @@ class LazyReentrantContextmanager():
         self.nesting_level -= 1
         if self.nesting_level == 0:
             self._exit(type, value, traceback)
-        self.entered = False
+            self.entered = False
 
