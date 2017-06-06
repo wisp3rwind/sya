@@ -26,6 +26,7 @@
 # TODO: Use colorama
 
 
+from functools import wraps
 import logging
 import os
 import subprocess
@@ -123,6 +124,7 @@ class Borg():
                                  "by the current user.")
 
     def __call__(self, command, args, repo):
+        assert(repo.entered)
         env = repo.borg_env() or None
 
         if self.verbose:
@@ -191,6 +193,20 @@ class Repository(PrePostScript):
         return(self.path)
 
 
+# Check if we want to run this backup task
+def if_enabled(f):
+    @wraps(f)
+    def wrapper(self, *args, **kwargs):
+        if self.enabled:
+            return(f(self, *args, **kwargs))
+        elif not hasattr(self, 'disabled_msg_shown'):
+            logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
+                          "in {name}")
+            self.disabled_msg_shown = True
+            return
+    return(wrapper)
+
+
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
@@ -237,22 +253,19 @@ class Task():
         self.lazy = True
         return(self)
 
+    @if_enabled
     def __enter__(self):
         self.repo(lazy=self.lazy).__enter__()
         self.scripts(lazy=self.lazy).__enter__()
         self.lazy = False
 
+    @if_enabled
     def __exit__(self, *exc):
         self.repo.__exit__(*exc)
         self.scripts.__exit__(*exc)
 
+    @if_enabled
     def backup(self, progress):
-        # Check if we want to run this backup task
-        if not self.enabled:
-            logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
-                          "in {name}")
-            return
-
         args = self.repo.borg_args(create=True)
 
         if self.borg.verbose:
@@ -292,6 +305,7 @@ class Task():
                           "You should investigate.")
             raise
 
+    @if_enabled
     def prune(self):
         if self.keep:
             args = []
@@ -393,7 +407,7 @@ def check(borg, progress, repo, items):
         repos = items or borg.repos
     else:
         tasks = items or borg.tasks
-        repos = set(borg.tasks[t].repo for t in tasks)
+        repos = set(borg.tasks[t].repo for t in tasks if t.enabled)
 
     for repo in repos:
         logging.info(f'-- Checking repository {repo.name}...')
