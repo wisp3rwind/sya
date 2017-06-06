@@ -1,5 +1,7 @@
 import os
 import socket
+import subprocess
+from subprocess import CalledProcessError
 
 
 def which(command):
@@ -84,3 +86,26 @@ class LazyReentrantContextmanager():
             self._exit(type, value, traceback)
             self.entered = False
 
+
+class ShellScript(yaml.YAMLObject):
+    """A YAML object with tag `!sh` that reads a scalar node and returns a
+    callable that executes the node's text through `subprocess` with
+    `shell=True`.
+    """
+    yaml_tag = '!sh'
+
+    @classmethod
+    def from_yaml(cls, loader, node):
+        script = node  # ??????????????????
+
+        def func():
+            try:
+                subprocess.check_output(script, shell=True,
+                                        stderr=subprocess.STDOUT)
+            except CalledProcessError as e:
+                raise
+        return(func)
+
+    @classmethod
+    def to_yaml(cls, dumper, data):
+        raise NotImplementedError()
