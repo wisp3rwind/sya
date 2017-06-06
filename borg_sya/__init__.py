@@ -65,29 +65,27 @@ class PrePostScript(LazyReentrantContextmanager):
         super().__init__()
 
         self.pre = pre
+        if not isinstance(self.pre, list):
+            self.pre = [self.pre]
         self.pre_desc = pre_desc
         self.post = post
+        if not isinstance(self.post, list):
+            self.post = [self.post]
         self.post_desc = post_desc
         self.borg = borg
 
     def _enter(self):
         # Exceptions from the pre- and post-scripts are intended to
         # propagate!
-        if self.pre:  # don't fail if self.pre == None
-            if isinstance(self.pre, str):
-                self.pre = [self.pre]
-            for script in self.pre:
-                self.borg.run_script(script, self.pre_desc)
+        for script in self.pre:
+            self.borg.run_script(script, self.pre_desc)
 
     def _exit(self, type, value, traceback):
-        if self.post:  # don't fail if self.post == None
-            if isinstance(self.post, str):
-                self.post = [self.post]
-            for script in self.post:
-                # Maybe use an environment variable instead?
-                # (BACKUP_STATUS=<borg returncode>)
-                self.borg.run_script(script, self.post_desc,
-                                     args=[str(1 if type else 0)])
+        for script in self.post:
+            # Maybe use an environment variable instead?
+            # (BACKUP_STATUS=<borg returncode>)
+            self.borg.run_script(script, self.post_desc,
+                                 args=[str(1 if type else 0)])
 
 
 class Borg():
