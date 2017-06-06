@@ -43,9 +43,12 @@ DEFAULT_CONFFILE = 'config.yaml'
 
 def which(command):
     for d in os.environ['PATH'].split(':'):
-        for binary in os.listdir(d):
-            if binary == command:
-                return os.path.join(d, command)
+        try:
+            for binary in os.listdir(d):
+                if binary == command:
+                    return os.path.join(d, command)
+        except OSError:
+            pass
     sys.exit(f"{command} error: command not found.")
 
 
@@ -209,7 +212,7 @@ class Repository(PrePostScript):
             try:
                 with open(passphrase_file) as f:
                     self.passphrase = f.readline().strip()
-            except IOError as e:
+            except OSError as e:
                 raise InvalidConfigurationError()
 
     def borg_args(self, create=False):
@@ -383,7 +386,7 @@ def main(ctx, confdir, dryrun, verbose):
     try:
         with open(os.path.join(confdir, DEFAULT_CONFFILE), 'r') as f:
             cfg = yaml.safe_load(f)
-    except IOError as e:
+    except OSError as e:
         logging.error(f"Cannot access configuration file: {e}")
         sys.exit(1)
 
