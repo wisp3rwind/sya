@@ -419,7 +419,7 @@ def check(borg, progress, repo, items):
 # TODO: it IS possible to mount a whole archive
 # Daemonizing is actually problematic since the unmounting won't take place.
 # @click.option('-f', '--foreground/--background',
-              # help="Whether to stay in the foreground or daemonize")
+#               help="Whether to stay in the foreground or daemonize")
 @click.argument('item', required=True)
 @click.argument('mountpoint', required=True)
 @click.pass_obj
