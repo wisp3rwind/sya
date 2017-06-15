@@ -196,16 +196,18 @@ class PythonScript(Script):
                 return(exec(script))
 
 
-seq = [(SequenceNode, None)]
-for a, b in [('tasks', 'pre'),
-             ('tasks', 'post'),
-             ('repositories', 'mount'),
-             ('repositories', 'umount')]:
-    path = [(MappingNode, a),
-            (MappingNode, None),  # name
-            (MappingNode, b),
-            ]
-    add_path_resolver('!external_script', path, ScalarNode,
-                      Loader=SafeLoader)
-    add_path_resolver('!external_script', path + seq, ScalarNode,
-                      Loader=SafeLoader)
+def register_yaml_resolvers():
+    seq = [(SequenceNode, None)]
+    for a, b in [('tasks', 'pre'),
+                 ('tasks', 'post'),
+                 ('repositories', 'mount'),
+                 ('repositories', 'umount')]:
+        path = [(MappingNode, a),
+                (MappingNode, None),  # name
+                (MappingNode, b),
+                ]
+        add_path_resolver('!external_script', path, ScalarNode,
+                          Loader=SafeLoader)
+        add_path_resolver('!external_script', path + seq, ScalarNode,
+                          Loader=SafeLoader)
+register_yaml_resolvers()
