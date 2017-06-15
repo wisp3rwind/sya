@@ -95,7 +95,9 @@ class Borg():
         self.verbose = verbose
 
     def run_script(self, script, msg="", args=None, env=None):
-        script(args, env, self.dryrun, self.confdir)
+        if script:
+            script(args=args, env=env, dryrun=self.dryrun,
+                   confdir=self.confdir)
 
     def __call__(self, command, args, repo):
         assert(repo.entered)
@@ -105,7 +107,9 @@ class Borg():
             args.insert(0, '--verbose')
         args.insert(0, command)
 
-        ExternalScript.run(BINARY, args, env, self.dryrun)
+        return(ExternalScript.run(BINARY,
+                                  args=args, env=env,
+                                  dryrun=self.dryrun))
 
 
 class Repository(PrePostScript):

@@ -104,16 +104,20 @@ class Script(YAMLObject):
     @staticmethod
     def run_popen(cmdline, env, dryrun, **popen_args):
         if dryrun:
-            logging.info(f"$ {' '.join(cmdline)}")
+            logging.info(f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}")
         else:
-            p = Popen(cmdline, env=env, stderr=subprocess.PIPE, **popen_args)
-            _, err = p.communicate()
+            p = Popen(cmdline, env=env,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                      **popen_args)
+            # TODO: Fix the deadlock when out/err buffers are full.
+            out, err = p.communicate()
             # sys.stderr.write(err)
             if p.returncode:
                 # TODO: this certainly fails with Unicode issues on some
                 # systems
-                raise RuntimeError(f"{path} returned {p.returncode}:\n"
+                raise RuntimeError(f"{cmdline} returned {p.returncode}:\n"
                                    f"{err.decode('utf8')}")
+            return(out.decode('utf8'))
 
     @classmethod
     def run(cls, script, args=None, env=None, dryrun=False):
@@ -154,7 +158,7 @@ class ExternalScript(Script):
                 cmdline = [script]
                 if args is not None:
                     cmdline.extend(args)
-                cls.run_popen(cmdline, env, dryrun)
+                return(cls.run_popen(cmdline, env, dryrun))
             else:
                 raise RuntimeError(f"{path} exists, but cannot be "
                                    f"executed by the current user.")
@@ -167,9 +171,9 @@ class ShellScript(Script):
 
     @classmethod
     def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
-        if args or env:
-            raise ValueError()
-
+        if args:
+            # logging.debug("ShellScript doesn't support `args`.")
+            pass
         cls.run_popen(script, env=env, dryrun=dryrun, shell=True)
 
 
@@ -189,7 +193,7 @@ class PythonScript(Script):
                         f">>> {'... '.join(script.splitlines(keepends=True))}")
             else:
                 # Propagate exceptions
-                exec(script)
+                return(exec(script))
 
 
 seq = [(SequenceNode, None)]
