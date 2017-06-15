@@ -32,6 +32,7 @@ from functools import wraps
 import logging
 import os
 import sys
+from time import sleep
 
 import click
 import yaml
@@ -419,11 +420,7 @@ def check(borg, progress, repo, items):
                    "only the last archive.")
 @click.option('--umask', default=None,
               help="Set umask when mounting")
-# TODO: --daemon choice
 # TODO: it IS possible to mount a whole archive
-# Daemonizing is actually problematic since the unmounting won't take place.
-# @click.option('-f', '--foreground/--background',
-#               help="Whether to stay in the foreground or daemonize")
 @click.argument('item', required=True)
 @click.argument('mountpoint', required=True)
 @click.pass_obj
@@ -431,6 +428,10 @@ def mount(borg, repo, all, umask, item, mountpoint):
     index = len(item)
     item = item.rstrip('^')
     index = index - len(item)
+
+    if repo and not all:
+        logging.error("Mounting only the last archive not implemented.")
+        sys.exit(1)
 
     if repo:
         repo, _, prefix = item.partition('::')
@@ -447,25 +448,44 @@ def mount(borg, repo, all, umask, item, mountpoint):
             logging.error(f'No such task: {item}')
             sys.exit(1)
 
-    logging.info(f"-- Mounting archive from repository '{repo.name}' "
-                 f"with prefix '{prefix}'...")
+    if index and all:
+        logging.error(f"Giving {'^' * index} and '--all' conflict.")
+        sys.exit(1)
+
+    if prefix and all:
+        logging.error(f"Borg doen't support mounting only archives with "
+                      f"a given prefix. Mounting only the last archive "
+                      f"matching '{prefix}'.")
+        all = False
+
     with repo:
         archive = None
-        if False or index:
+        if not all:
+            logging.info(f"-- Searching for last archive from "
+                         f"repository '{repo.name}' with prefix '{prefix}'.")
             args = repo.borg_args()
             args.append(f"{repo}")
-            # args.append('--short')
-            # format: 'prefix     Mon, 2017-05-22 02:52:37'
+            if prefix:
+                args.extend(['--prefix', prefix])
+            # default format: 'prefix     Mon, 2017-05-22 02:52:37'
+            # --short format: 'prefix'
+            args.append('--short')
             archives = borg('list', args, repo)
-            archive = archives.split('\n')[-index]
-            logging.info(f"-- Selected archive {archive}")
+            archive = archives.splitlines()[-index - 1]
+            logging.info(f"-- Selected archive '{archive}'")
+
         args = repo.borg_args()
+        # By default, borg daemonizes and exits on unmount. Since we want to
+        # run post-scripts (e.g. umount), this is not sensible.
         args.append('--foreground')
         if archive:
             args.append(f"{repo}::{archive}")
         else:
             args.append(f"{repo}")
         args.append(mountpoint)
+
+        logging.info(f"-- Mounting archive from repository '{repo.name}' "
+                     f"with prefix '{prefix}'...")
         try:
             borg('mount', args, repo)
         except BackupError as e:
@@ -473,8 +493,16 @@ def mount(borg, repo, all, umask, item, mountpoint):
                           f"{e}\n"
                           f"You should investigate.")
             sys.exit(1)
-    # TODO: is this true?
-    logging.info('-- Done mounting. borg has daemonized, manually unmount '
-                 'the repo to shut down the FUSE driver.')
+        except KeyboardInterrupt:
+            while True:
+                try:
+                    logging.info(borg('umount', [mountpoint], repo))
+                except RuntimeError as e:
+                    if 'failed to unmount' in str(e):
+                        # Might fail if this happens to quickly after mounting.
+                        sleep(2)
+                        continue
+
+        logging.info('-- Done unmounting (the FUSE driver has exited).')
 
 # vim: ts=4 sw=4 expandtab
