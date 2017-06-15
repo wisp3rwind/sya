@@ -31,14 +31,12 @@
 from functools import wraps
 import logging
 import os
-import subprocess
-from subprocess import Popen
 import sys
 
 import click
 import yaml
 
-from .util import (which, isexec,
+from .util import (which, ExternalScript,
                    LockInUse, ProcessLock,
                    LazyReentrantContextmanager)
 
@@ -96,33 +94,8 @@ class Borg():
         self.dryrun = dryrun
         self.verbose = verbose
 
-    def _run(self, path, args=None, env=None):
-        if self.dryrun:
-            logging.info(f"$ {path} {' '.join(args or [])}")
-            # print("$ %s %s" % (path, ' '.join(args or []), ))
-        else:
-            cmdline = [path]
-            if args is not None:
-                cmdline.extend(args)
-            # print(cmdline, env)
-            p = Popen(cmdline, env=env, stderr=subprocess.PIPE)
-            _, err = p.communicate()
-            # sys.stderr.write(err)
-            if p.returncode:
-                # TODO: this certainly fails with Unicode issues on some systems
-                raise BackupError(f"{path} returned {p.returncode}:\n"
-                                  f"{err.decode('utf8')}")
-
-    def run_script(self, path, msg="", args=None, env=None):
-        if path:
-            if not os.path.isabs(path):
-                path = os.path.join(self.confdir, path)
-            if os.path.isfile(path):
-                if isexec(path):
-                    self._run(path, args, env)
-                else:
-                    raise BackupError(f"{path} exists, but cannot be executed "
-                                      f"by the current user.")
+    def run_script(self, script, msg="", args=None, env=None):
+        script(args, env, self.dryrun, self.confdir)
 
     def __call__(self, command, args, repo):
         assert(repo.entered)
@@ -131,7 +104,8 @@ class Borg():
         if self.verbose:
             args.insert(0, '--verbose')
         args.insert(0, command)
-        self._run(BINARY, args, env=env)
+
+        ExternalScript.run(BINARY, args, env, self.dryrun)
 
 
 class Repository(PrePostScript):

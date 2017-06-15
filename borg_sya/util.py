@@ -1,7 +1,8 @@
+import logging
 import os
 import socket
 import subprocess
-from subprocess import CalledProcessError
+from subprocess import Popen
 from yaml import YAMLObject, add_path_resolver
 from yaml.loader import SafeLoader
 from yaml.nodes import ScalarNode, MappingNode, SequenceNode
@@ -100,8 +101,26 @@ class Script(YAMLObject):
     def __init__(self, script):
         self.script = script
 
-    def __call__(self):
+    @staticmethod
+    def run_popen(cmdline, env, dryrun, **popen_args):
+        if dryrun:
+            logging.info(f"$ {' '.join(cmdline)}")
+        else:
+            p = Popen(cmdline, env=env, stderr=subprocess.PIPE, **popen_args)
+            _, err = p.communicate()
+            # sys.stderr.write(err)
+            if p.returncode:
+                # TODO: this certainly fails with Unicode issues on some
+                # systems
+                raise RuntimeError(f"{path} returned {p.returncode}:\n"
+                                   f"{err.decode('utf8')}")
+
+    @classmethod
+    def run(cls, script, args=None, env=None, dryrun=False):
         raise NotImplementedError()
+
+    def __call__(self, **kwargs):
+        self.run(self.script, **kwargs)
 
     @classmethod
     def from_yaml(cls, loader, node):
@@ -123,8 +142,22 @@ class ExternalScript(Script):
     """
     yaml_tag = '!external_script'
 
-    def __call__(self):
-        subprocess.check_call(self.script, stderr=subprocess.STDOUT)
+    @classmethod
+    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
+        if script:
+            if not os.path.isabs(script):
+                script = os.path.join(confdir, script)
+            if not os.path.isfile(script):
+                raise RuntimeError()
+
+            if isexec(script):
+                cmdline = [script]
+                if args is not None:
+                    cmdline.extend(args)
+                cls.run_popen(cmdline, env, dryrun)
+            else:
+                raise RuntimeError(f"{path} exists, but cannot be "
+                                   f"executed by the current user.")
 
 
 class ShellScript(Script):
@@ -132,9 +165,12 @@ class ShellScript(Script):
     """
     yaml_tag = '!sh'
 
-    def __call__(self):
-        subprocess.check_output(self.script, shell=True,
-                                stderr=subprocess.STDOUT)
+    @classmethod
+    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
+        if args or env:
+            raise ValueError()
+
+        cls.run_popen(script, env=env, dryrun=dryrun, shell=True)
 
 
 class PythonScript(Script):
@@ -142,11 +178,18 @@ class PythonScript(Script):
     """
     yaml_tag = '!python'
 
-    def __call__(self):
-        try:
-            exec(self.script)
-        except CalledProcessError as e:
-            raise
+    @classmethod
+    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
+        if script:
+            if args or env:
+                raise NotImplementedError()
+
+            if dryrun:
+                logging.info(
+                        f">>> {'... '.join(script.splitlines(keepends=True))}")
+            else:
+                # Propagate exceptions
+                exec(script)
 
 
 seq = [(SequenceNode, None)]
