@@ -102,25 +102,35 @@ class Script(YAMLObject):
         self.script = script
 
     @staticmethod
-    def run_popen(cmdline, env, dryrun, **popen_args):
+    def run_popen(cmdline, env, dryrun, capture_out=True, **popen_args):
         if dryrun:
             logging.info(f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}")
-        else:
+            return
+
+        # TODO: replace communicate() with a function that captures the output,
+        # but still permits printing it immediately.
+        if capture_out:
             p = Popen(cmdline, env=env,
                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                       **popen_args)
             # TODO: Fix the deadlock when out/err buffers are full.
-            out, err = p.communicate()
+        else:
+            p = Popen(cmdline, env=env, **popen_args)
             # sys.stderr.write(err)
-            if p.returncode:
-                # TODO: this certainly fails with Unicode issues on some
-                # systems
-                raise RuntimeError(f"{cmdline} returned {p.returncode}:\n"
-                                   f"{err.decode('utf8')}")
+
+        out, err = p.communicate()
+
+        if p.returncode:
+            # TODO: this certainly fails with Unicode issues on some
+            # systems
+            raise RuntimeError(f"{cmdline} returned {p.returncode}:\n"
+                               f"{err.decode('utf8') if err else ''}")
+
+        if capture_out:  # out == None if not capture_out
             return(out.decode('utf8'))
 
     @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False):
+    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
         raise NotImplementedError()
 
     def __call__(self, **kwargs):
@@ -147,7 +157,8 @@ class ExternalScript(Script):
     yaml_tag = '!external_script'
 
     @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
+    def run(cls, script, args=None, env=None, dryrun=False, capture_out=True,
+            confdir=None):
         if script:
             if not os.path.isabs(script):
                 script = os.path.join(confdir, script)
@@ -158,7 +169,8 @@ class ExternalScript(Script):
                 cmdline = [script]
                 if args is not None:
                     cmdline.extend(args)
-                return(cls.run_popen(cmdline, env, dryrun))
+                return(cls.run_popen(cmdline, env, dryrun,
+                                     capture_out=capture_out))
             else:
                 raise RuntimeError(f"{path} exists, but cannot be "
                                    f"executed by the current user.")

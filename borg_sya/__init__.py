@@ -110,7 +110,8 @@ class Borg():
 
         return(ExternalScript.run(BINARY,
                                   args=args, env=env,
-                                  dryrun=self.dryrun))
+                                  dryrun=self.dryrun,
+                                  capture_out=False))
 
 
 class Repository(PrePostScript):
