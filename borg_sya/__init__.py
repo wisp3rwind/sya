@@ -348,7 +348,7 @@ def main(ctx, confdir, dryrun, verbose):
     logging.shutdown()
 
 
-@main.command(help="Do a backup run. If no Task is speified, run all.")
+@main.command(help="Do a backup run. If no Task is specified, run all.")
 @click.option('-p', '--progress/--no-progress',
               help="Show progress.")
 @click.argument('tasks', nargs=-1)
