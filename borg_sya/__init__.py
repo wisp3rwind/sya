@@ -345,6 +345,9 @@ def main(ctx, confdir, dryrun, verbose):
 
     ctx.obj = borg
 
+
+@main.resultcallback()
+def exit(*args, **kwargs):
     logging.shutdown()
 
 
