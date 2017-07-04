@@ -1,8 +1,11 @@
+from io import BytesIO
 import logging
 import os
 import socket
 import subprocess
+import sys
 from subprocess import Popen
+from threading import Thread
 from yaml import YAMLObject, add_path_resolver
 from yaml.loader import SafeLoader
 from yaml.nodes import ScalarNode, MappingNode, SequenceNode
@@ -102,32 +105,46 @@ class Script(YAMLObject):
         self.script = script
 
     @staticmethod
-    def run_popen(cmdline, env, dryrun, capture_out=True, **popen_args):
+    def run_popen(cmdline, env, dryrun, **popen_args):
         if dryrun:
             logging.info(f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}")
             return
+        # https://stackoverflow.com/questions/4984428/python-subprocess-get-childrens-output-to-file-and-terminal
+        # https://stackoverflow.com/questions/17190221/subprocess-popen-cloning-stdout-and-stderr-both-to-terminal-and-variables
+        def tee(infile, *files):
+            def fanout(infile, *files):
+                while True:
+                    d = infile.readline(128)
+                    if len(d):
+                        for f, flush in files:
+                            f.write(d)
+                            if flush:
+                                f.flush()
+                    else:
+                        break
+                infile.close()
+            t = Thread(target=fanout, args=(infile, *files))
+            t.daemon = True
+            t.start()
+            return(t)
 
-        # TODO: replace communicate() with a function that captures the output,
-        # but still permits printing it immediately.
-        if capture_out:
-            p = Popen(cmdline, env=env,
-                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                      **popen_args)
-            # TODO: Fix the deadlock when out/err buffers are full.
-        else:
-            p = Popen(cmdline, env=env, **popen_args)
-            # sys.stderr.write(err)
-
-        out, err = p.communicate()
+        p = Popen(cmdline, env=env,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  **popen_args)
+        out = BytesIO()
+        err = BytesIO()
+        t_out = tee(p.stdout, (sys.stdout.buffer, True), (out, False))
+        t_err = tee(p.stderr, (sys.stderr.buffer, True), (err, False))
+        t_out.join()
+        t_err.join()
+        p.wait()
+        # TODO: Are there encoding issues here? (or above?)
+        out = out.getvalue().decode('utf8')
+        err = err.getvalue().decode('utf8')
 
         if p.returncode:
-            # TODO: this certainly fails with Unicode issues on some
-            # systems
-            raise RuntimeError(f"{cmdline} returned {p.returncode}:\n"
-                               f"{err.decode('utf8') if err else ''}")
-
-        if capture_out:  # out == None if not capture_out
-            return(out.decode('utf8'))
+            raise RuntimeError(f"{cmdline} returned {p.returncode}:\n{err}")
+        return(out + err)
 
     @classmethod
     def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
@@ -169,8 +186,7 @@ class ExternalScript(Script):
                 cmdline = [script]
                 if args is not None:
                     cmdline.extend(args)
-                return(cls.run_popen(cmdline, env, dryrun,
-                                     capture_out=capture_out))
+                return(cls.run_popen(cmdline, env, dryrun))
             else:
                 raise RuntimeError(f"{path} exists, but cannot be "
                                    f"executed by the current user.")
