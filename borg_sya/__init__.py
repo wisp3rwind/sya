@@ -255,8 +255,6 @@ class Task():
         if progress:
             args.append('--progress')
 
-        args.append(f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
-
         # include and exclude patterns
         includes = self.includes[:]
         excludes = []
@@ -274,7 +272,9 @@ class Task():
 
         for exclude in excludes:
             args.extend(['--exclude', exclude.strip()])
+        args.append(f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
         args.extend(i.strip() for i in includes)
+
 
         # run the backup
         try:
