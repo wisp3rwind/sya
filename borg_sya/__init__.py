@@ -357,23 +357,23 @@ def exit(*args, **kwargs):
 @click.argument('tasks', nargs=-1)
 @click.pass_obj
 def create(borg, progress, tasks):
-    lock = ProcessLock('sya' + borg.confdir)
     try:
-        lock.acquire()
+        with ProcessLock('sya' + borg.confdir):
+            for task in (tasks or borg.tasks):
+                try:
+                    task = borg.tasks[task]
+                except KeyError:
+                    logging.error(f'-- No such task: {task}, skipping...')
+                else:
+                    logging.info(f'-- Backing up using {task} configuration...')
+                    with task(lazy=True):
+                        task.backup(progress)
+                        task.prune()
+                    logging.info(f'-- Done backing up {task}.')
     except LockInUse:
         logging.error('Another instance seems to be running '
                       'on the same conf dir.')
         sys.exit(1)
-
-    for task in (tasks or borg.tasks):
-        task = borg.tasks[task]
-        logging.info(f'-- Backing up using {task} configuration...')
-        with task(lazy=True):
-            task.backup(progress)
-            task.prune()
-        logging.info(f'-- Done backing up {task}.')
-
-    lock.release()
 
 
 @main.command(help="Perform a check for repository consistency. "
