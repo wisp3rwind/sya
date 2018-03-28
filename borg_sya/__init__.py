@@ -247,7 +247,7 @@ class Task():
         self.repo.__exit__(*exc)
 
     @if_enabled
-    def backup(self, progress):
+    def create(self, progress):
         args = self.repo.borg_args(create=True)
 
         if self.borg.verbose:
@@ -368,7 +368,7 @@ def create(borg, progress, tasks):
                 else:
                     logging.info(f'-- Backing up using {task} configuration...')
                     with task(lazy=True):
-                        task.backup(progress)
+                        task.create(progress)
                         task.prune()
                     logging.info(f'-- Done backing up {task}.')
     except LockInUse:
