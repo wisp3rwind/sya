@@ -61,7 +61,7 @@ class BackupError(Exception):
 
 
 class PrePostScript(LazyReentrantContextmanager):
-    def __init__(self, pre, pre_desc, post, post_desc, borg):
+    def __init__(self, pre, pre_desc, post, post_desc, runner):
         super().__init__()
 
         self.pre = pre
@@ -72,24 +72,27 @@ class PrePostScript(LazyReentrantContextmanager):
         if not isinstance(self.post, list):
             self.post = [self.post]
         self.post_desc = post_desc
-        self.borg = borg
+        self.runner = runner
 
     def _enter(self):
         # Exceptions from the pre- and post-scripts are intended to
         # propagate!
         for script in self.pre:
-            self.borg.run_script(script, self.pre_desc)
+            self.runner.run_script(script, self.pre_desc)
 
     def _exit(self, type, value, traceback):
         for script in self.post:
             # Maybe use an environment variable instead?
             # (BACKUP_STATUS=<borg returncode>)
-            self.borg.run_script(script, self.post_desc,
-                                 args=[str(1 if type else 0)])
+            self.runner.run_script(script, self.post_desc,
+                                   args=[str(1 if type else 0)])
 
 
-class Borg():
+class ScriptRunner():
     """Encapsulate all information related to running external tools.
+
+    TODO: This is a stub written during refactoring. Either get rid of it or
+    turn it into something useful.
     """
     def __init__(self, confdir, dryrun, verbose):
         self.confdir = confdir
@@ -100,6 +103,14 @@ class Borg():
         if script:
             script(args=args, env=env, dryrun=self.dryrun,
                    confdir=self.confdir)
+
+class Borg():
+    """Encapsulate all information related to running borg.
+    """
+    def __init__(self, confdir, dryrun, verbose):
+        self.confdir = confdir
+        self.dryrun = dryrun
+        self.verbose = verbose
 
     def __call__(self, command, args, repo):
         assert(repo.entered)
@@ -114,32 +125,14 @@ class Borg():
                                   dryrun=self.dryrun))
 
 
-class Repository(PrePostScript):
-    def __init__(self, name, cfg, borg):
+class BorgRepository():
+    def __init__(self, name, path, borg,
+                 compression=None, remote_path=None,
+                 ):
         self.name = name
-        self.borg = borg
-
-        self.path = cfg['path']
-
-        super().__init__(
-            cfg.get('mount', None), f'Mount script for repository {name}',
-            cfg.get('umount', None), f'Unmount script for repository {name}',
-            borg
-        )
-
-        self.compression = cfg.get('compression', None)
-        self.passphrase = cfg.get('passphrase', '')
-        passphrase_file = cfg.get('passphrase-file', None)
-        self.remote_path = cfg.get('remote-path', None)
-
-        # check if we have a passphrase file
-        if passphrase_file:
-            passphrase_file = os.path.join(borg.confdir, passphrase_file)
-            try:
-                with open(passphrase_file) as f:
-                    self.passphrase = f.readline().strip()
-            except OSError as e:
-                raise InvalidConfigurationError()
+        self.path = path
+        self.compression = compression
+        self.remote_path = remote_path
 
     def borg_args(self, create=False):
         args = []
@@ -175,6 +168,51 @@ class Repository(PrePostScript):
         """
         return(self.path)
 
+class Repository(BorgRepository, PrePostScript):
+    def __init__(self, name, path, borg, runner,
+                 compression=None, remote_path=None,
+                 pre=None, pre_desc=None, post=None, post_desc=None,
+                 ):
+        PrePostScript.__init__(
+            self,
+            pre, pre_desc, post, post_desc,
+            runner
+            )
+        BorgRepository.__init__(
+            self,
+            name, path=path,
+            compression=compression, remote_path=remote_path,
+            borg=borg,
+            )
+
+    @classmethod
+    def from_yaml(cls, name, cfg, borg, runner):
+        # check if we have a passphrase file
+        passphrase = cfg.get('passphrase', '')
+        passphrase_file = cfg.get('passphrase-file', None)
+        if passphrase_file:
+            passphrase_file = os.path.join(borg.confdir, passphrase_file)
+            try:
+                with open(passphrase_file) as f:
+                    passphrase = f.readline().strip()
+            except OSError as e:
+                raise InvalidConfigurationError()
+
+        return cls(
+            # BorgRepository args
+            name,
+            path=cfg['path'],
+            compression = cfg.get('compression', None)
+            remote_path = cfg.get('remote-path', None)
+            borg=borg,
+            # PrePostScript args
+            pre=cfg.get('mount', None),
+            pre_desc=f'Mount script for repository {name}',
+            post=cfg.get('umount', None),
+            post_desc=f'Unmount script for repository {name}',
+            runner=runner
+            )
+
 
 # Check if we want to run this backup task
 def if_enabled(f):
@@ -193,41 +231,68 @@ def if_enabled(f):
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
-    def __init__(self, name, cfg, borg):
-        try:
-            self.name = name
-            self.borg = borg
+    def __init__(self, name, borg,
+                 repo, enabled, prefix, keep,
+                 includes, include_file, exclude_file,
+                 pre, pre_desc, post, post_desc,
+                 ):
+        self.name = name
+        self.borg = borg
+        self.repo = repo
+        self.enabled = enabled
+        self.prefix = prefix
+        self.keep = keep
+        self.includes = includes
+        self.include_file = include_file
+        self.exclude_file = exclude_file
 
-            if 'repository' not in cfg:
-                raise InvalidConfigurationError("'repository' is mandatory "
-                                                "for each task in config")
-            self.repo = borg.repos[cfg['repository']]
+        self.lazy = False
+        self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
+                                          borg)
 
-            self.enabled = cfg.get('run_this', True)
-            self.keep = cfg.get('keep', {})
-            if not all(k in self.KEEP_INTERVALS for k in self.keep):
-                raise InvalidConfigurationError()
-            self.prefix = cfg.get('prefix', '{hostname}')
-            self.include_file = cfg.get('include_file', None)
-            self.exclude_file = cfg.get('exclude_file', None)
-            self.includes = cfg.get('includes', [])
-            if not self.includes and not self.include_file:
-                raise InvalidConfigurationError(f"'paths' is mandatory in "
-                                                "configuration file {name}")
-            if self.include_file:
-                self.include_file = os.path.join(borg.confdir,
-                                                 self.include_file)
-            if self.exclude_file:
-                self.exclude_file = os.path.join(borg.confdir,
-                                                 self.exclude_file)
-            self.scripts = PrePostScript(
-                cfg.get('pre', None), f"'{name}' pre-backup script",
-                cfg.get('post', None), f"'{name}' post-backup script",
-                borg)
+    @classmethod
+    def from_yaml(cls, name, cfg, borg, runner):
+        if 'repository' not in cfg:
+            raise InvalidConfigurationError("'repository' is mandatory "
+                                            "for each task in config")
+
+        keep = cfg.get('keep', {})
+        if not all(k in self.KEEP_INTERVALS for k in keep):
+            raise InvalidConfigurationError()
+
+        include_file = cfg.get('include_file', None)
+        exclude_file = cfg.get('exclude_file', None)
+        includes = cfg.get('includes', [])
+        if not includes and not include_file:
+            raise InvalidConfigurationError(f"'paths' is mandatory in "
+                                            "configuration file {name}")
+        # Do not load include and exclude files yet since this task might
+        # not even be run.
+        if include_file:
+            include_file = os.path.join(borg.confdir, include_file)
+        if exclude_file:
+            exclude_file = os.path.join(borg.confdir, exclude_file)
+
         except (KeyError, ValueError, TypeError) as e:
             raise InvalidConfigurationError(str(e))
 
-        self.lazy = False
+        return cls(
+            name,
+            borg=borg,
+            repo=borg.repos[cfg['repository']],
+            enabled=cfg.get('run_this', True),
+            prefix=cfg.get('prefix', '{hostname}'),
+            keep=keep,
+            includes=includes,
+            include_file=include_file,
+            exclude_file=exclude_file,
+            # PrePostScript args
+            pre=cfg.get('pre', None),
+            pre_desc=f"'{name}' pre-backup script",
+            post=cfg.get('post', None),
+            post_desc=f"'{name}' post-backup script",
+            runner=runner
+            )
 
     def __str__(self):
         return(self.name)
@@ -339,13 +404,14 @@ def main(ctx, confdir, dryrun, verbose):
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Object to hold all global state.
+    # Objects to hold some global state.
     borg = Borg(confdir, dryrun, verbose)
+    runner = ScriptRunner(confdir, dryrun, verbose)
 
     # Parse configuration into corresponding classes.
-    borg.repos = {repo: Repository(repo, rcfg, borg)
+    borg.repos = {repo: Repository.from_yaml(repo, rcfg, borg, runner)
                   for repo, rcfg in cfg['repositories'].items()}
-    borg.tasks = {task: Task(task, tcfg, borg)
+    borg.tasks = {task: Task.from_yaml(task, tcfg, borg, runner)
                   for task, tcfg in cfg['tasks'].items()}
 
     ctx.obj = borg
