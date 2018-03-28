@@ -26,6 +26,7 @@
 # TODO: Use colorama
 # TODO: Bypass main() when doing `borg-sya {create|check|...} --help` in order
 #       not to crash on broken configs
+# TODO: Command that executes the pre-scripts and then drops the user in a shell
 
 
 from functools import wraps
