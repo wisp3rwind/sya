@@ -103,14 +103,14 @@ class Borg():
 
     def __call__(self, command, args, repo):
         assert(repo.entered)
-        env = repo.borg_env() or None
 
         if self.verbose:
             args.insert(0, '--verbose')
         args.insert(0, command)
 
         return(ExternalScript.run(BINARY,
-                                  args=args, env=env,
+                                  args=args,
+                                  env=repo.borg_env or None,
                                   dryrun=self.dryrun))
 
 
@@ -151,6 +151,7 @@ class Repository(PrePostScript):
 
         return(args)
 
+    @property
     def borg_env(self):
         env = {}
         if self.passphrase:
