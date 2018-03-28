@@ -272,6 +272,9 @@ class Task():
             with open(self.exclude_file) as f:
                 excludes.extend(f.readlines())
 
+        if not includes:
+            raise RuntimeError()
+
         for exclude in excludes:
             args.extend(['--exclude', exclude.strip()])
         args.append(f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
