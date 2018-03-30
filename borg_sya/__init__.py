@@ -99,29 +99,29 @@ class ScriptRunner():
 
 
 class Repository(borg.Repository, PrePostScript):
-    def __init__(self, name, path, borg, runner,
+    def __init__(self, name, path, cx,
                  compression=None, remote_path=None,
                  pre=None, pre_desc=None, post=None, post_desc=None,
                  ):
         PrePostScript.__init__(
             self,
             pre, pre_desc, post, post_desc,
-            runner
+            cx.runner,
             )
         BorgRepository.__init__(
             self,
             name, path=path,
             compression=compression, remote_path=remote_path,
-            borg=borg,
+            borg=cx.borg,
             )
 
     @classmethod
-    def from_yaml(cls, name, cfg, borg, runner):
+    def from_yaml(cls, name, cfg, cx):
         # check if we have a passphrase file
         passphrase = cfg.get('passphrase', '')
         passphrase_file = cfg.get('passphrase-file', None)
         if passphrase_file:
-            passphrase_file = os.path.join(borg.confdir, passphrase_file)
+            passphrase_file = os.path.join(cx, passphrase_file)
             try:
                 with open(passphrase_file) as f:
                     passphrase = f.readline().strip()
@@ -134,13 +134,12 @@ class Repository(borg.Repository, PrePostScript):
             path=cfg['path'],
             compression = cfg.get('compression', None)
             remote_path = cfg.get('remote-path', None)
-            borg=borg,
+            cx=cx,
             # PrePostScript args
             pre=cfg.get('mount', None),
             pre_desc=f'Mount script for repository {name}',
             post=cfg.get('umount', None),
             post_desc=f'Unmount script for repository {name}',
-            runner=runner
             )
 
     def check(self):
@@ -170,13 +169,13 @@ def if_enabled(f):
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
-    def __init__(self, name, borg,
+    def __init__(self, name, cx,
                  repo, enabled, prefix, keep,
                  includes, include_file, exclude_file,
                  pre, pre_desc, post, post_desc,
                  ):
         self.name = name
-        self.borg = borg
+        self.cx = cx
         self.repo = repo
         self.enabled = enabled
         self.prefix = prefix
@@ -190,7 +189,7 @@ class Task():
                                           borg)
 
     @classmethod
-    def from_yaml(cls, name, cfg, borg, runner):
+    def from_yaml(cls, name, cfg, cx):
         if 'repository' not in cfg:
             raise InvalidConfigurationError("'repository' is mandatory "
                                             "for each task in config")
@@ -217,8 +216,8 @@ class Task():
 
         return cls(
             name,
-            borg=borg,
-            repo=borg.repos[cfg['repository']],
+            cx=cx,
+            repo=cx.repos[cfg['repository']],
             enabled=cfg.get('run_this', True),
             prefix=cfg.get('prefix', '{hostname}'),
             keep=keep,
@@ -230,7 +229,6 @@ class Task():
             pre_desc=f"'{name}' pre-backup script",
             post=cfg.get('post', None),
             post_desc=f"'{name}' post-backup script",
-            runner=runner
             )
 
     def __str__(self):
@@ -271,7 +269,7 @@ class Task():
         # run the backup
         try:
             with self:  # Load and execute if applicable pre-task commands
-                self.borg.create(
+                self.cx.borg.create(
                     self.repo,
                     [i.strip() for i in includes],
                     [e.strip() for i in excludes],
@@ -302,6 +300,28 @@ class Task():
             raise InvalidConfigurationError(e)
 
 
+class Context():
+    def __init__(self, confdir, dryrun, verbose, repos=None, tasks=None):
+        self.confdir = confdir
+        self.dryrun = dryrun
+        self.verbose = verbose
+        self.repos = repos or dict()
+        self.tasks = tasks or dict()
+        self.borg = Borg(confdir, dryrun, verbose)
+        self.runner = ScriptRunner(confdir, dryrun, verbose)
+
+    def validate_repos(self, repos):
+        repos = items or self.repos
+        repos = [self.repos[r] for r in repos]
+        return repos
+
+    def validate_tasks(self, tasks):
+        tasks = items or self.tasks
+        tasks = [self.tasks[t] for t in tasks]
+        repos = set(t.repo for t in tasks if t.enabled)
+        return (tasks, repos)
+
+
 @click.group()
 @click.option('-d', '--config-dir', 'confdir',
               default=DEFAULT_CONFDIR,
@@ -312,7 +332,10 @@ class Task():
               help="Be verbose and print stats.")
 @click.pass_context
 def main(ctx, confdir, dryrun, verbose):
-    logging.basicConfig(format='%(message)s', level=logging.WARNING)
+    logging.basicConfig(
+        format='{name}: {message}', style='}',
+        level=logging.WARNING,
+    )
 
     if not os.path.isdir(confdir):
         sys.exit(f"Configuration directory '{confdir}' not found.")
@@ -331,17 +354,19 @@ def main(ctx, confdir, dryrun, verbose):
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Objects to hold some global state.
-    borg = Borg(confdir, dryrun, verbose)
-    runner = ScriptRunner(confdir, dryrun, verbose)
-
     # Parse configuration into corresponding classes.
-    borg.repos = {repo: Repository.from_yaml(repo, rcfg, borg, runner)
-                  for repo, rcfg in cfg['repositories'].items()}
-    borg.tasks = {task: Task.from_yaml(task, tcfg, borg, runner)
-                  for task, tcfg in cfg['tasks'].items()}
-
-    ctx.obj = borg
+    cx = Context(
+        confdir = confdir,
+        dryrun = dryrun,
+        verbose = verbose,
+        )
+    cx.repos = {repo: Repository.from_yaml(repo, rcfg, cx)
+                for repo, rcfg in cfg['repositories'].items()
+                }
+    cx.tasks = {task: Task.from_yaml(task, tcfg, cx)
+                for task, tcfg in cfg['tasks'].items()
+                }
+    ctx.obj = cx
 
 
 @main.resultcallback()
@@ -354,12 +379,12 @@ def exit(*args, **kwargs):
               help="Show progress.")
 @click.argument('tasks', nargs=-1)
 @click.pass_obj
-def create(borg, progress, tasks):
+def create(cx, progress, tasks):
     try:
-        with ProcessLock('sya' + borg.confdir):
-            for task in (tasks or borg.tasks):
+        with ProcessLock('sya' + cx.confdir):
+            for task in (tasks or cx.tasks):
                 try:
-                    task = borg.tasks[task]
+                    task = cx.tasks[task]
                 except KeyError:
                     logging.error(f'-- No such task: {task}, skipping...')
                 else:
@@ -384,14 +409,11 @@ def create(borg, progress, tasks):
                    "them from tasks.")
 @click.argument('items', nargs=-1)
 @click.pass_obj
-def check(borg, progress, repo, items):
+def check(cx, progress, repo, items):
     if repo:
-        repos = items or borg.repos
-        repos = [borg.repos[r] for r in repos]
+        repos = cx.validate_repos(items)
     else:
-        tasks = items or borg.tasks
-        tasks = [borg.tasks[t] for t in tasks]
-        repos = set(t.repo for t in tasks if t.enabled)
+        _, repos = cx.validate_tasks(items)
 
     for repo in repos:
         logging.info(f'-- Checking repository {repo.name}...')
@@ -425,7 +447,7 @@ def check(borg, progress, repo, items):
 @click.argument('item', required=True)
 @click.argument('mountpoint', required=True)
 @click.pass_obj
-def mount(borg, repo, all, umask, item, mountpoint):
+def mount(cx, repo, all, umask, item, mountpoint):
     index = len(item)
     item = item.rstrip('^')
     index = index - len(item)
@@ -437,14 +459,14 @@ def mount(borg, repo, all, umask, item, mountpoint):
     if repo:
         repo, _, prefix = item.partition('::')
         try:
-            repo = borg.repos[item]
+            repo = cx.repos[item]
         except KeyError:
             logging.error(f"No such repository: '{item}'")
             sys.exit(1)
     else:
         try:
-            repo = borg.tasks[item].repo
-            prefix = borg.tasks[item].prefix
+            repo = cx.tasks[item].repo
+            prefix = cx.tasks[item].prefix
         except KeyError:
             logging.error(f'No such task: {item}')
             sys.exit(1)
@@ -471,7 +493,7 @@ def mount(borg, repo, all, umask, item, mountpoint):
             # default format: 'prefix     Mon, 2017-05-22 02:52:37'
             # --short format: 'prefix'
             args.append('--short')
-            archives = borg('list', args, repo)
+            archives = cx.borg('list', args, repo)
             archive = archives.splitlines()[-index - 1]
             logging.info(f"-- Selected archive '{archive}'")
 
@@ -488,7 +510,7 @@ def mount(borg, repo, all, umask, item, mountpoint):
         logging.info(f"-- Mounting archive from repository '{repo.name}' "
                      f"with prefix '{prefix}'...")
         try:
-            borg('mount', args, repo)
+            cx.borg('mount', args, repo)
         except BackupError as e:
             logging.error(f"mounting '{repo.name}' failed: \n"
                           f"{e}\n"
