@@ -41,22 +41,15 @@ import yaml
 from .util import (which, ExternalScript,
                    LockInUse, ProcessLock,
                    LazyReentrantContextmanager)
+import .borg
+from .borg import (Borg, BorgError)
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config.yaml'
-
-
-try:
-    BINARY = which('borg')
-except RuntimeError as e:
-    sys.exit(str(e))
+APP_NAME = 'borg-sya'
 
 
 class InvalidConfigurationError(Exception):
-    pass
-
-
-class BackupError(Exception):
     pass
 
 
@@ -104,71 +97,8 @@ class ScriptRunner():
             script(args=args, env=env, dryrun=self.dryrun,
                    confdir=self.confdir)
 
-class Borg():
-    """Encapsulate all information related to running borg.
-    """
-    def __init__(self, confdir, dryrun, verbose):
-        self.confdir = confdir
-        self.dryrun = dryrun
-        self.verbose = verbose
 
-    def __call__(self, command, args, repo):
-        assert(repo.entered)
-
-        if self.verbose:
-            args.insert(0, '--verbose')
-        args.insert(0, command)
-
-        return(ExternalScript.run(BINARY,
-                                  args=args,
-                                  env=repo.borg_env or None,
-                                  dryrun=self.dryrun))
-
-
-class BorgRepository():
-    def __init__(self, name, path, borg,
-                 compression=None, remote_path=None,
-                 ):
-        self.name = name
-        self.path = path
-        self.compression = compression
-        self.remote_path = remote_path
-
-    def borg_args(self, create=False):
-        args = []
-        if self.remote_path:
-            args.extend(['--remote-path', self.remote_path])
-
-        if create and self.compression:
-            args.extend(['--compression', self.compression])
-
-        return(args)
-
-    @property
-    def borg_env(self):
-        env = {}
-        if self.passphrase:
-            env['BORG_PASSPHRASE'] = self.passphrase
-
-        return(env)
-
-    def check(self):
-        args = self.borg_args()
-        args.append(f"{self}")
-        try:
-            with self:
-                self.borg('check', args, self)
-        except BackupError:
-            logging.error(f"'{self.name}' backup check failed. You "
-                          "should investigate.")
-            raise
-
-    def __str__(self):
-        """Used to construct the commandline arguments for borg, do not change!
-        """
-        return(self.path)
-
-class Repository(BorgRepository, PrePostScript):
+class Repository(borg.Repository, PrePostScript):
     def __init__(self, name, path, borg, runner,
                  compression=None, remote_path=None,
                  pre=None, pre_desc=None, post=None, post_desc=None,
@@ -212,6 +142,15 @@ class Repository(BorgRepository, PrePostScript):
             post_desc=f'Unmount script for repository {name}',
             runner=runner
             )
+
+    def check(self):
+        try:
+            with self:
+                self.borg.check(self)
+        except BorgError as e:
+            logging.error(f"'{self}' backup check failed ({e}). You "
+                          "should investigate.")
+            raise
 
 
 # Check if we want to run this backup task
@@ -314,14 +253,7 @@ class Task():
 
     @if_enabled
     def create(self, progress):
-        args = self.repo.borg_args(create=True)
-
-        if self.borg.verbose:
-            args.append('--stats')
-
-        if progress:
-            args.append('--progress')
-
+        # TODO: Human-readable logging.
         # include and exclude patterns
         includes = self.includes[:]
         excludes = []
@@ -332,47 +264,42 @@ class Task():
                         excludes.append(line[2:])
                     else:
                         includes.append(line)
-
         if self.exclude_file:
             with open(self.exclude_file) as f:
                 excludes.extend(f.readlines())
 
-        if not includes:
-            raise RuntimeError()
-
-        for exclude in excludes:
-            args.extend(['--exclude', exclude.strip()])
-        args.append(f'{self.repo}::{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}')
-        args.extend(i.strip() for i in includes)
-
-
         # run the backup
         try:
-            # Load and execute if applicable pre-task commands
-            with self:
-                self.borg('create', args, self.repo)
-        except BackupError:
-            logging.error(f"'{self.name}' backup failed. "
-                          "You should investigate.")
+            with self:  # Load and execute if applicable pre-task commands
+                self.borg.create(
+                    self.repo,
+                    [i.strip() for i in includes],
+                    [e.strip() for i in excludes],
+                    prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
+                    stats=True,
+                    )
+        except BorgError:
+            self._log.error(f"'{self.name}' backup failed. "
+                            "You should investigate.")
             raise
 
     @if_enabled
     def prune(self):
-        if self.keep:
-            args = []
-            if self.borg.verbose:
-                args.extend(['--list', '--stats'])
-            for interval, number in self.keep.items():
-                args.extend([f'--keep-{interval}', str(number)])
-            args.append(f'--prefix={self.prefix}-')
-            args.append(f"{self.repo}")
-            try:
-                with self:
-                    self.borg('prune', args, self.repo)
-            except BackupError:
-                logging.error(f"'{self.name}' old files cleanup failed. "
-                              "You should investigate.")
-                raise
+        try:
+            with self:
+                self.borg.prune(self.repo,
+                                self.keep,
+                                prefix=f'{self.prefix}-',
+                                )
+        except BorgError:
+            logging.error(f"'{self.name}' old files cleanup failed. "
+                          "You should investigate.")
+            raise
+        except ValueError as e:
+            logging.error(f"'{self.name}' old files cleanup failed ({e})."
+                          "You should investigate, your configuration might be "
+                          "invalid.")
+            raise InvalidConfigurationError(e)
 
 
 @click.group()
