@@ -32,13 +32,15 @@ class LockInUse(Exception):
 
 
 class ProcessLock():
-    """This class comes from this very elegant way of having a pid lock in
-    order to prevent multiple instances from running on the same host.
+    """This reentrant lock class comes from this very elegant way of having a
+    pid lock in order to prevent multiple instances from running on the same
+    host.
     http://stackoverflow.com/a/7758075
     """
 
     def __init__(self, process_name):
-        self.pname = process_name
+        self._recursion_level = 0
+        self._pname = process_name
 
     def __enter__(self):
         self.acquire()
@@ -47,17 +49,21 @@ class ProcessLock():
         self.release()
 
     def acquire(self):
-        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        try:
-            # The bind address is the one of an abstract UNIX socket (begins
-            # with a null byte) followed by an address which exists in the
-            # abstract socket namespace (Linux only). See unix(7).
-            self.socket.bind('\0' + self.pname)
-        except socket.error:
-            raise LockInUse
+        if not self._recursion_level:
+            self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            try:
+                # The bind address is the one of an abstract UNIX socket (begins
+                # with a null byte) followed by an address which exists in the
+                # abstract socket namespace (Linux only). See unix(7).
+                self._socket.bind('\0' + self._pname)
+            except socket.error:
+                raise LockInUse
+        self._recursion_level += 1
 
     def release(self):
-        self.socket.close()
+        self._recursion_level -= 1
+        if not self._recursion_level:
+            self._socket.close()
 
 
 class LazyReentrantContextmanager():
