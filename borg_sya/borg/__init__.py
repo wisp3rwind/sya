@@ -218,7 +218,28 @@ class Borg():
                     raise NotImplementedError()
                     progress_cb(msg)
 
-    def mount(self):
+    def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False):
+        raise NotImplementedError()
+        options = repo.borg_args()
+        if foreground:
+            options.append('--foreground')
+
+        if archive:
+            target = f'{repo}::{archive}'
+        else:
+            target = str(repo)
+
+        with repo:
+            for msg in self._run('mount', options):
+                if msg.type == 'log_message':
+                    if hasattr(msg, 'msgid') and msg.msgid:
+                        if msg.msgid in self._PROMPT_MESSAGE_IDS:
+                            raise RuntimeError()
+                        else:
+                            # Debug messages, ...
+                            pass
+
+    def umount(self):
         raise NotImplementedError()
 
     def extract(self):
@@ -228,6 +249,10 @@ class Borg():
              prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
              sort_by='', additional_keys=[], pandas=True):
+        # NOTE: This can list either repo contents (archives) or archive
+        # contents (files). Respect that, maybe even split in separate methods
+        # (since e.g. repos should have the 'short' option to only return the
+        # prefix, while only archives should have the pandas option(?)).
         options = repo.borg_args()
 
         if prefix and glob:
@@ -237,6 +262,11 @@ class Borg():
             options.extend(['--prefix', prefix])
         if glob:
             options.extend(['--glob-archives', glob])
+
+        if short:
+            # default format: 'prefix     Mon, 2017-05-22 02:52:37'
+            # --short format: 'prefix'
+            pass
 
         if sort_by:
             if sort_by in 'timestamp name id'.split():
