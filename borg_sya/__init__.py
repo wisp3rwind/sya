@@ -416,6 +416,12 @@ def exit(*args, **kwargs):
     logging.shutdown()
 
 
+@main.command(help="Launch the GUI.")
+@click.pass_obj
+def gui(ctx):
+    pass
+
+
 @main.command(help="Do a backup run. If no Task is specified, run all.")
 @click.option('-p', '--progress/--no-progress',
               help="Show progress.")
