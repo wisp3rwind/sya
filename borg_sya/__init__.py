@@ -98,21 +98,20 @@ class ScriptRunner():
                    confdir=self.confdir)
 
 
-class Repository(borg.Repository, PrePostScript):
+class Repository(borg.Repository):
     def __init__(self, name, path, cx,
                  compression=None, remote_path=None,
                  pre=None, pre_desc=None, post=None, post_desc=None,
                  ):
-        PrePostScript.__init__(
-            self,
-            pre, pre_desc, post, post_desc,
-            cx.runner,
-            )
-        BorgRepository.__init__(
+        super().__init__(
             self,
             name, path=path,
             compression=compression, remote_path=remote_path,
             borg=cx.borg,
+            )
+        self.scripts = PrePostScript(
+            pre, pre_desc, post, post_desc,
+            cx.runner,
             )
 
     @classmethod
@@ -142,14 +141,25 @@ class Repository(borg.Repository, PrePostScript):
             post_desc=f'Unmount script for repository {name}',
             )
 
+    def __call__(self, *, lazy=False):
+        self.lazy = lazy
+        return(self)
+
+    @if_enabled
+    def __enter__(self):
+        self._lock = self.cx.lock(str(self))
+        self._lock.__enter__()
+        self.scripts(lazy=self.lazy).__enter__()
+        self.lazy = False
+
+    @if_enabled
+    def __exit__(self, *exc):
+        self.scripts.__exit__(*exc)
+        self._lock.__exit__(*exc)
+
     def check(self):
-        try:
-            with self:
-                self.borg.check(self)
-        except BorgError as e:
-            logging.error(f"'{self}' backup check failed ({e}). You "
-                          "should investigate.")
-            raise
+        with self:
+            self.cx.borg.check(self)
 
 
 # Check if we want to run this backup task
@@ -267,19 +277,14 @@ class Task():
                 excludes.extend(f.readlines())
 
         # run the backup
-        try:
-            with self:  # Load and execute if applicable pre-task commands
-                self.cx.borg.create(
-                    self.repo,
-                    [i.strip() for i in includes],
-                    [e.strip() for i in excludes],
-                    prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
-                    stats=True,
-                    )
-        except BorgError:
-            self._log.error(f"'{self.name}' backup failed. "
-                            "You should investigate.")
-            raise
+        with self:
+            self.cx.borg.create(
+                self.repo,
+                [i.strip() for i in includes],
+                [e.strip() for i in excludes],
+                prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
+                stats=True,
+                )
 
     @if_enabled
     def prune(self):
@@ -301,14 +306,62 @@ class Task():
 
 
 class Context():
-    def __init__(self, confdir, dryrun, verbose, repos=None, tasks=None):
+    def __init__(self, confdir, dryrun, verbose, log, repos, tasks):
         self.confdir = confdir
         self.dryrun = dryrun
         self.verbose = verbose
+        self.log = log
         self.repos = repos or dict()
         self.tasks = tasks or dict()
         self.borg = Borg(confdir, dryrun, verbose)
         self.runner = ScriptRunner(confdir, dryrun, verbose)
+
+    @classmethod
+    def from_configuration(cls, conffile):
+        logging.basicConfig(
+            format='{name}: {message}', style='}',
+            level=logging.WARNING,
+        )
+        log = logging.getLogger()
+
+        try:
+            with open(conffile, 'r') as f:
+                cfg = yaml.safe_load(f)
+        except OSError as e:
+            log.error(f"Configuration file at '{conffile}' not found or not "
+                      f"accessible:\n{e}")
+            raise
+
+        # TODO: proper validation of the config file
+        if 'verbose' in cfg['sya']:
+            assert(isinstance(cfg['sya']['verbose'], bool))
+            verbose = verbose or cfg['sya']['verbose']
+
+        # Parse configuration into corresponding classes.
+        cx = cls(confdir=confdir, dryrun=dryrun,
+                 verbose=verbose, log=log,
+                 repos=None, tasks=None,
+                 )
+        cx.repos = {repo: Repository.from_yaml(repo, rcfg, cx)
+                    for repo, rcfg in cfg['repositories'].items()
+                    }
+        cx.tasks = {task: Task.from_yaml(task, tcfg, cx)
+                    for task, tcfg in cfg['tasks'].items()
+                    }
+
+        return cx
+
+    @property
+    def verbose(self):
+        return self._verbose
+    
+    @verbose.setter
+    def verbose(self, value):
+        if value:
+            log.setLevel(logging.DEBUG)
+        else:
+            log.setLevel(logging.WARNING)
+
 
     def validate_repos(self, repos):
         repos = items or self.repos
@@ -321,6 +374,11 @@ class Context():
         repos = set(t.repo for t in tasks if t.enabled)
         return (tasks, repos)
 
+    def lock(*args):
+        with ProcessLock('sya' + self.confdir + '-'.join(*args)):
+            yield
+
+
 
 @click.group()
 @click.option('-d', '--config-dir', 'confdir',
@@ -332,40 +390,13 @@ class Context():
               help="Be verbose and print stats.")
 @click.pass_context
 def main(ctx, confdir, dryrun, verbose):
-    logging.basicConfig(
-        format='{name}: {message}', style='}',
-        level=logging.WARNING,
-    )
-
-    if not os.path.isdir(confdir):
-        sys.exit(f"Configuration directory '{confdir}' not found.")
-
     try:
-        with open(os.path.join(confdir, DEFAULT_CONFFILE), 'r') as f:
-            cfg = yaml.safe_load(f)
-    except OSError as e:
-        logging.error(f"Cannot access configuration file: {e}")
-        sys.exit(1)
-
-    # TODO: proper validation of the config file
-    if 'verbose' in cfg['sya']:
-        assert(isinstance(cfg['sya']['verbose'], bool))
-        verbose = verbose or cfg['sya']['verbose']
+        cx = Context.from_configuration(os.path.join(confdir, DEFAULT_CONFFILE))
+    except OSError:
+        ui(f"Configuration file at '{conffile}' not found or not accessible.")
     if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    # Parse configuration into corresponding classes.
-    cx = Context(
-        confdir = confdir,
-        dryrun = dryrun,
-        verbose = verbose,
-        )
-    cx.repos = {repo: Repository.from_yaml(repo, rcfg, cx)
-                for repo, rcfg in cfg['repositories'].items()
-                }
-    cx.tasks = {task: Task.from_yaml(task, tcfg, cx)
-                for task, tcfg in cfg['tasks'].items()
-                }
+        cx.verbose = verbose
+    cx.dryrun = dryrun
     ctx.obj = cx
 
 
@@ -380,23 +411,28 @@ def exit(*args, **kwargs):
 @click.argument('tasks', nargs=-1)
 @click.pass_obj
 def create(cx, progress, tasks):
-    try:
-        with ProcessLock('sya' + cx.confdir):
-            for task in (tasks or cx.tasks):
+    cx = cx.sub_context('CREATE')
+    for task in (tasks or cx.tasks):
+        try:
+            task = cx.tasks[task]
+        except KeyError:
+            cx.log.error(f'-- No such task: {task}, skipping...')
+        else:
+            cx.log.info(f'-- Backing up using {task} configuration...')
+            with task(lazy=True):
                 try:
-                    task = cx.tasks[task]
-                except KeyError:
-                    logging.error(f'-- No such task: {task}, skipping...')
+                    task.create(progress)
+                except BorgError as e:
+                    cx.log.error(f"'{task}' backup failed. "
+                                 f"You should investigate.")
+                except LockInUse:
+                    cx.log.error(f"-- Another process seems to be accessing "
+                                 f"the repository {task.repo.name}. "
+                                 f"Could not create a new archive for task "
+                                 f"{task}.")
                 else:
-                    logging.info(f'-- Backing up using {task} configuration...')
-                    with task(lazy=True):
-                        task.create(progress)
-                        task.prune()
-                    logging.info(f'-- Done backing up {task}.')
-    except LockInUse:
-        logging.error('Another instance seems to be running '
-                      'on the same conf dir.')
-        sys.exit(1)
+                    task.prune()
+                    cx.log.info(f'-- Done backing up {task}.')
 
 
 @main.command(help="Perform a check for repository consistency. "
@@ -416,9 +452,18 @@ def check(cx, progress, repo, items):
         _, repos = cx.validate_tasks(items)
 
     for repo in repos:
-        logging.info(f'-- Checking repository {repo.name}...')
-        repo.check()
-        logging.info(f'-- Done checking {repo.name}.')
+        cx.log.info(f'-- Checking repository {repo.name}...')
+        try:
+            repo.check()
+        except BorgError as e:
+            cx.log.error(f"-- Error {e} when checking repository {repo.name}."
+                         f"You should investigate.")
+        except LockInUse as e:
+            cx.log.error(f"-- Another process seems to be accessing the "
+                         f"repository {repo.name}. Could not check it.")
+            continue
+        else:
+            cx.log.info(f'-- Done checking {repo.name}.')
 
 
 @main.command(help="Mount a snapshot. Takes a repository or task and the "
@@ -481,51 +526,46 @@ def mount(cx, repo, all, umask, item, mountpoint):
                       f"matching '{prefix}'.")
         all = False
 
-    with repo:
+    with repo(lazy=True):
         archive = None
         if not all:
-            logging.info(f"-- Searching for last archive from "
-                         f"repository '{repo.name}' with prefix '{prefix}'.")
-            args = repo.borg_args()
-            args.append(f"{repo}")
-            if prefix:
-                args.extend(['--prefix', prefix])
-            # default format: 'prefix     Mon, 2017-05-22 02:52:37'
-            # --short format: 'prefix'
-            args.append('--short')
-            archives = cx.borg('list', args, repo)
-            archive = archives.splitlines()[-index - 1]
-            logging.info(f"-- Selected archive '{archive}'")
+            cx.log.info(f"-- Searching for last archive from "
+                        f"repository '{repo.name}' with prefix '{prefix}'.")
+            try:
+                # short will only output archive names,
+                # last return only the index+1 most recent archives
+                archive = cx.borg.list(repo, prefix,
+                                       short=True, last=index + 1)[0]
+            except IndexError, BorgError:
+                sys.exit(1)
+            cx.log.info(f"-- Selected archive '{archive}'")
 
-        args = repo.borg_args()
-        # By default, borg daemonizes and exits on unmount. Since we want to
-        # run post-scripts (e.g. umount), this is not sensible.
-        args.append('--foreground')
-        if archive:
-            args.append(f"{repo}::{archive}")
-        else:
-            args.append(f"{repo}")
-        args.append(mountpoint)
+        # TODO: interactive archive selection!
 
-        logging.info(f"-- Mounting archive from repository '{repo.name}' "
-                     f"with prefix '{prefix}'...")
+        cx.log.info(f"-- Mounting archive from repository '{repo.name}' "
+                    f"with prefix '{prefix}'...")
         try:
-            cx.borg('mount', args, repo)
-        except BackupError as e:
-            logging.error(f"mounting '{repo.name}' failed: \n"
-                          f"{e}\n"
-                          f"You should investigate.")
-            sys.exit(1)
+            # By default, borg daemonizes and exits on unmount. Since we want
+            # to run post-scripts (e.g. umount), this is not sensible and we
+            # set foreground to True.
+            cx.borg.mount(repo, archive, mountpoint, foreground=True)
+        except BorgError as e:
+            cx.log.error(f"-- Mounting '{repo.name}' failed: \n"
+                         f"{e}\n"
+                         f"You should investigate.")
         except KeyboardInterrupt:
             while True:
                 try:
-                    logging.info(borg('umount', [mountpoint], repo))
-                except RuntimeError as e:
+                    borg.umount(repo, mountpoint)
+                    # TODO: Find out what the JSON log/output of borg mount
+                    # are, log something appropriate here
+                    break
+                except (BorgError, RuntimeError) as e:
                     if 'failed to unmount' in str(e):
                         # Might fail if this happens to quickly after mounting.
                         sleep(2)
                         continue
 
-        logging.info('-- Done unmounting (the FUSE driver has exited).')
+            cx.log.info('-- Done unmounting (the FUSE driver has exited).')
 
 # vim: ts=4 sw=4 expandtab
