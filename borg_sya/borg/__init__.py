@@ -1,6 +1,5 @@
 from functools import wraps
 import json
-import logging
 from queue import Queue
 import signal
 from subprocess import Popen, PIPE
@@ -8,6 +7,8 @@ import sys
 from threading import Condition, Thread
 
 from .defs import (BorgError, )
+
+from ..util import which
 
 # TODO:
 # - logging (component-wise, hierarchical)
@@ -20,17 +21,18 @@ try:
     BINARY = which('borg')
 except RuntimeError as e:
     sys.exit(str(e))
-_log = logging.getLogger('borg')
 
 
 class Repository():
     def __init__(self, name, path, borg,
-                 compression=None, remote_path=None,
+                 compression=None, remote_path=None, passphrase=None,
                  ):
         self.name = name
         self.path = path
+        self.borg = borg
         self.compression = compression
         self.remote_path = remote_path
+        self.passphrase = passphrase
 
     def borg_args(self, create=False):
         args = []
@@ -158,7 +160,6 @@ class Borg():
             if hasattr(msg, 'msgid') and msg.msgid:
                 if msg.msgid in self._ERROR_MESSAGE_IDS:
                     e = BorgError(**msg)
-                    _log(e)
                     raise e
 
         return msg
@@ -228,6 +229,7 @@ class Borg():
             target = f'{repo}::{archive}'
         else:
             target = str(repo)
+        options.append(target)
 
         with repo:
             for msg in self._run('mount', options):
@@ -248,7 +250,7 @@ class Borg():
     def list(self, repo,
              prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
-             sort_by='', additional_keys=[], pandas=True):
+             sort_by='', additional_keys=[], pandas=True, short=False):
         # NOTE: This can list either repo contents (archives) or archive
         # contents (files). Respect that, maybe even split in separate methods
         # (since e.g. repos should have the 'short' option to only return the
@@ -302,12 +304,10 @@ class Borg():
         output = (json.loads(line) for line in output)
         if pandas:
             import pandas as pd
-            return pd.DataFrame.from_records(
-                    output,
-                    # TODO: set dtype for all fields that could occur (defaults
-                    # or additional_keys)
-                    # dtype=...,
-                    )
+            # TODO: set dtype for all fields that could occur (defaults or
+            # additional_keys)
+            # dtype=...,
+            return pd.DataFrame.from_records(output)
         else:
             return list(output)
 

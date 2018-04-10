@@ -6,9 +6,8 @@ import subprocess
 import sys
 from subprocess import Popen
 from threading import Thread
-from yaml import YAMLObject, add_path_resolver
+from yaml import YAMLObject
 from yaml.loader import SafeLoader
-from yaml.nodes import ScalarNode, MappingNode, SequenceNode
 
 
 def which(command):
@@ -52,9 +51,9 @@ class ProcessLock():
         if not self._recursion_level:
             self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
             try:
-                # The bind address is the one of an abstract UNIX socket (begins
-                # with a null byte) followed by an address which exists in the
-                # abstract socket namespace (Linux only). See unix(7).
+                # The bind address is the one of an abstract UNIX socket
+                # (begins with a null byte) followed by an address which exists
+                # in the abstract socket namespace (Linux only). See unix(7).
                 self._socket.bind('\0' + self._pname)
             except socket.error:
                 raise LockInUse
@@ -100,6 +99,11 @@ class LazyReentrantContextmanager():
             self.entered = False
 
 
+def indent(text, by=4):
+    by = by * ' '
+    return by + text.replace('\n', '\n' + by)
+
+
 class Script(YAMLObject):
     """A YAML object with a tag to be set by subclasses that reads a scalar
     node and returns a callable that executes the node's text.
@@ -110,11 +114,7 @@ class Script(YAMLObject):
     def __init__(self, script):
         self.script = script
 
-    @staticmethod
-    def run_popen(cmdline, env, dryrun, **popen_args):
-        if dryrun:
-            logging.info(f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}")
-            return
+    def run_popen(self, cmdline, **popen_args):
         # https://stackoverflow.com/questions/4984428/python-subprocess-get-childrens-output-to-file-and-terminal
         # https://stackoverflow.com/questions/17190221/subprocess-popen-cloning-stdout-and-stderr-both-to-terminal-and-variables
         def tee(infile, *files):
@@ -134,7 +134,7 @@ class Script(YAMLObject):
             t.start()
             return(t)
 
-        p = Popen(cmdline, env=env,
+        p = Popen(cmdline, env=self.env,
                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                   **popen_args)
         out = BytesIO()
@@ -152,12 +152,26 @@ class Script(YAMLObject):
             raise RuntimeError(f"{cmdline} returned {p.returncode}:\n{err}")
         return(out + err)
 
-    @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
+    def run(self,
+            log, args=None, env=None,
+            dryrun=False, capture_out=True,
+            dir=None, pretend=False):
+        if self.script:
+            self.log = log
+            self.args = args
+            self.env = env
+            self.dryrun = dryrun
+            self.capture_out = capture_out
+            self.dir = dir
+            self._pretend = pretend
+            self._run()
+            self._pretend = False
+
+    def _run(self):
         raise NotImplementedError()
 
     def __call__(self, **kwargs):
-        self.run(self.script, **kwargs)
+        self.run(**kwargs)
 
     @classmethod
     def from_yaml(cls, loader, node):
@@ -179,23 +193,23 @@ class ExternalScript(Script):
     """
     yaml_tag = '!external_script'
 
-    @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False, capture_out=True,
-            confdir=None):
-        if script:
-            if not os.path.isabs(script):
-                script = os.path.join(confdir, script)
-            if not os.path.isfile(script):
-                raise RuntimeError()
+    def _run(self):
+        if not os.path.isabs(self.script):
+            script = os.path.join(self.dir, self.script)
+        if not os.path.isfile(script):
+            raise RuntimeError()
 
-            if isexec(script):
-                cmdline = [script]
-                if args is not None:
-                    cmdline.extend(args)
-                return(cls.run_popen(cmdline, env, dryrun))
+        if isexec(script):
+            cmdline = [script]
+            if self.args is not None:
+                cmdline.extend(self.args)
+            if self._pretend:
+                return f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}"
             else:
-                raise RuntimeError(f"{path} exists, but cannot be "
-                                   f"executed by the current user.")
+                return(self.run_popen(cmdline))
+        else:
+            raise RuntimeError(f"{script} exists, but cannot be "
+                               f"executed by the current user.")
 
 
 class ShellScript(Script):
@@ -203,12 +217,14 @@ class ShellScript(Script):
     """
     yaml_tag = '!sh'
 
-    @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
-        if args:
+    def _run(self):
+        if self.args:
             # logging.debug("ShellScript doesn't support `args`.")
             pass
-        cls.run_popen(script, env=env, dryrun=dryrun, shell=True)
+        if self._pretend:
+            return indent(self.script)
+        else:
+            return self.run_popen(self.script, shell=True)
 
 
 class PythonScript(Script):
@@ -216,32 +232,12 @@ class PythonScript(Script):
     """
     yaml_tag = '!python'
 
-    @classmethod
-    def run(cls, script, args=None, env=None, dryrun=False, confdir=None):
-        if script:
-            if args or env:
-                raise NotImplementedError()
+    def _run(self):
+        if self.args or self.env:
+            raise NotImplementedError()
 
-            if dryrun:
-                logging.info(
-                        f">>> {'... '.join(script.splitlines(keepends=True))}")
-            else:
-                # Propagate exceptions
-                return(exec(script))
-
-
-def register_yaml_resolvers():
-    seq = [(SequenceNode, None)]
-    for a, b in [('tasks', 'pre'),
-                 ('tasks', 'post'),
-                 ('repositories', 'mount'),
-                 ('repositories', 'umount')]:
-        path = [(MappingNode, a),
-                (MappingNode, None),  # name
-                (MappingNode, b),
-                ]
-        add_path_resolver('!external_script', path, ScalarNode,
-                          Loader=SafeLoader)
-        add_path_resolver('!external_script', path + seq, ScalarNode,
-                          Loader=SafeLoader)
-register_yaml_resolvers()
+        if self._pretend:
+            return indent(f">>> {'... '.join(script.splitlines(keepends=True))}")
+        else:
+            # Propagate exceptions
+            return(exec(self.script))

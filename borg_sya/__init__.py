@@ -38,10 +38,13 @@ from time import sleep
 
 import click
 import yaml
+from yaml.loader import SafeLoader
+from yaml.nodes import ScalarNode, MappingNode, SequenceNode
 
-from .util import (which, ExternalScript,
-                   LockInUse, ProcessLock,
+from . import util
+from .util import (LockInUse, ProcessLock,
                    LazyReentrantContextmanager)
+from . import borg
 from .borg import (Borg, BorgError)
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
@@ -54,7 +57,7 @@ class InvalidConfigurationError(Exception):
 
 
 class PrePostScript(LazyReentrantContextmanager):
-    def __init__(self, pre, pre_desc, post, post_desc, runner):
+    def __init__(self, pre, pre_desc, post, post_desc, dryrun, log, dir):
         super().__init__()
 
         self.pre = pre
@@ -65,50 +68,75 @@ class PrePostScript(LazyReentrantContextmanager):
         if not isinstance(self.post, list):
             self.post = [self.post]
         self.post_desc = post_desc
-        self.runner = runner
+        self.dryrun = dryrun
+        self.log = log
+        self.dir = dir
+
+    def _run_script(self, script, cx, args=None, env=None):
+        if script:
+            assert(isinstance(script, util.Script))
+            if not self.dryrun:
+                script.run(args=args, env=env,
+                           log=self.log, dryrun=self.dryrun,
+                           dir=self.dir)
+            else:
+                self.log.info(
+                    script.run(pretend=True,
+                               args=args, env=env,
+                               log=self.log, dryrun=self.dryrun,
+                               dir=self.dir)
+                )
+
+    def _announce(self, msg):
+        msg = "Running " + msg
+        if not self.dryrun:
+            self.log.debug(msg)
+        else:
+            self.log.info(msg)
 
     def _enter(self):
         # Exceptions from the pre- and post-scripts are intended to
         # propagate!
+        self._announce(self.pre_desc)
         for script in self.pre:
-            self.runner.run_script(script, self.pre_desc)
+            self._run_script(script)
 
     def _exit(self, type, value, traceback):
+        self._announce(self.post_desc)
         for script in self.post:
             # Maybe use an environment variable instead?
             # (BACKUP_STATUS=<borg returncode>)
-            self.runner.run_script(script, self.post_desc,
-                                   args=[str(1 if type else 0)])
+            self._run_script(script, "Running " + self.post_desc,
+                             args=[str(1 if type else 0)])
 
 
-class ScriptRunner():
-    """Encapsulate all information related to running external tools.
-
-    TODO: This is a stub written during refactoring. Either get rid of it or
-    turn it into something useful.
-    """
-    def __init__(self, confdir, dryrun, verbose):
-        self.confdir = confdir
-        self.dryrun = dryrun
-        self.verbose = verbose
-
-    def run_script(self, script, msg="", args=None, env=None):
-        if script:
-            script(args=args, env=env, dryrun=self.dryrun,
-                   confdir=self.confdir)
+# Check if we want to run this backup task
+def if_enabled(f):
+    @wraps(f)
+    def wrapper(self, *args, **kwargs):
+        if self.enabled:
+            return(f(self, *args, **kwargs))
+        elif not hasattr(self, 'disabled_msg_shown'):
+            self.cx.debug(f"! Task disabled. Set 'run_this' to 'yes' "
+                          f"in config section {self.name} to change this.")
+            self.disabled_msg_shown = True
+            return
+    return(wrapper)
 
 
 class Repository(borg.Repository):
     def __init__(self, name, path, cx,
-                 compression=None, remote_path=None,
+                 compression=None, remote_path=None, passphrase=None,
                  pre=None, pre_desc=None, post=None, post_desc=None,
                  ):
         super().__init__(self,
                          name, path=path,
                          compression=compression, remote_path=remote_path,
+                         passphrase=passphrase,
                          borg=cx.borg,
                          )
-        self.scripts = PrePostScript(pre, pre_desc, post, post_desc, cx.runner)
+        self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
+                                     cx.dryrun, cx.log, cx.confdir)
 
     @classmethod
     def from_yaml(cls, name, cfg, cx):
@@ -129,12 +157,13 @@ class Repository(borg.Repository):
             path=cfg['path'],
             compression=cfg.get('compression', None),
             remote_path=cfg.get('remote-path', None),
+            passphrase=passphrase,
             cx=cx,
             # PrePostScript args
             pre=cfg.get('mount', None),
-            pre_desc=f'Mount script for repository {name}',
+            pre_desc=f'mount script for repository {name}',
             post=cfg.get('umount', None),
-            post_desc=f'Unmount script for repository {name}',
+            post_desc=f'unmount script for repository {name}',
         )
 
     def __call__(self, *, lazy=False):
@@ -158,20 +187,6 @@ class Repository(borg.Repository):
             self.cx.borg.check(self)
 
 
-# Check if we want to run this backup task
-def if_enabled(f):
-    @wraps(f)
-    def wrapper(self, *args, **kwargs):
-        if self.enabled:
-            return(f(self, *args, **kwargs))
-        elif not hasattr(self, 'disabled_msg_shown'):
-            logging.debug(f"! Task disabled. 'run_this' must be set to 'yes' "
-                          "in {name}")
-            self.disabled_msg_shown = True
-            return
-    return(wrapper)
-
-
 class Task():
     KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
 
@@ -191,7 +206,8 @@ class Task():
         self.exclude_file = exclude_file
 
         self.lazy = False
-        self.scripts = PrePostScript(pre, pre_desc, post, post_desc, cx.runner)
+        self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
+                                     cx.dryrun, cx.log, cx.confdir)
 
     @classmethod
     def from_yaml(cls, name, cfg, cx):
@@ -201,7 +217,7 @@ class Task():
                                                 "for each task in config")
 
             keep = cfg.get('keep', {})
-            if not all(k in self.KEEP_INTERVALS for k in keep):
+            if not all(k in cls.KEEP_INTERVALS for k in keep):
                 raise InvalidConfigurationError()
 
             include_file = cfg.get('include_file', None)
@@ -276,7 +292,7 @@ class Task():
             self.cx.borg.create(
                 self.repo,
                 [i.strip() for i in includes],
-                [e.strip() for i in excludes],
+                [e.strip() for e in excludes],
                 prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
                 stats=True,
             )
@@ -289,27 +305,44 @@ class Task():
                                 self.keep,
                                 prefix=f'{self.prefix}-',
                                 )
-        except BorgError:
-            logging.error(f"'{self.name}' old files cleanup failed. "
-                          "You should investigate.")
+        except BorgError as e:
+            self.cx.error(e)
+            self.cx.error(f"'{self.name}' old files cleanup failed. "
+                          f"You should investigate.")
             raise
         except ValueError as e:
-            logging.error(f"'{self.name}' old files cleanup failed ({e})."
+            self.cx.error(f"'{self.name}' old files cleanup failed ({e})."
                           f"You should investigate, your configuration might "
                           f"be invalid.")
             raise InvalidConfigurationError(e)
 
 
+class SyaSafeLoader(SafeLoader):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        seq = [(SequenceNode, None)]
+        for a, b in [('tasks', 'pre'),
+                     ('tasks', 'post'),
+                     ('repositories', 'mount'),
+                     ('repositories', 'umount')]:
+            path = [(MappingNode, a),
+                    (MappingNode, None),  # name
+                    (MappingNode, b),
+                    ]
+            self.add_path_resolver('!external_script', path, ScalarNode)
+            self.add_path_resolver('!external_script', path + seq, ScalarNode)
+
+
 class Context():
-    def __init__(self, scriptdir, dryrun, verbose, log, repos, tasks):
-        self.scriptdir = scriptdir
+    def __init__(self, confdir, dryrun, verbose, log, repos, tasks):
+        self.confdir = confdir
         self.dryrun = dryrun
         self.verbose = verbose
         self.log = log
         self.repos = repos or dict()
         self.tasks = tasks or dict()
-        self.borg = Borg(confdir, dryrun, verbose)
-        self.runner = ScriptRunner(confdir, dryrun, verbose)
+        self.borg = Borg(dryrun, verbose)
 
     @classmethod
     def from_configuration(cls, confdir, conffile):
@@ -323,19 +356,18 @@ class Context():
             conffile = os.path.join(confdir, conffile)
         try:
             with open(conffile, 'r') as f:
-                cfg = yaml.safe_load(f)
+                cfg = yaml.load(f, SyaSafeLoader)
         except OSError as e:
             log.error(f"Configuration file at '{conffile}' not found or not "
                       f"accessible:\n{e}")
             raise
 
         # TODO: proper validation of the config file
-        if 'verbose' in cfg['sya']:
-            assert(isinstance(cfg['sya']['verbose'], bool))
-            verbose = verbose or cfg['sya']['verbose']
+        verbose = cfg['sya'].get('verbose', False)
+        assert(isinstance(cfg['sya']['verbose'], bool))
 
         # Parse configuration into corresponding classes.
-        cx = cls(scriptdir=confdir, dryrun=dryrun,
+        cx = cls(confdir=confdir, dryrun=False,
                  verbose=verbose, log=log,
                  repos=None, tasks=None,
                  )
@@ -355,22 +387,22 @@ class Context():
     @verbose.setter
     def verbose(self, value):
         if value:
-            log.setLevel(logging.DEBUG)
+            self.log.setLevel(logging.DEBUG)
         else:
-            log.setLevel(logging.WARNING)
+            self.log.setLevel(logging.WARNING)
 
     def validate_repos(self, repos):
-        repos = items or self.repos
+        repos = repos or self.repos
         repos = [self.repos[r] for r in repos]
         return repos
 
     def validate_tasks(self, tasks):
-        tasks = items or self.tasks
+        tasks = tasks or self.tasks
         tasks = [self.tasks[t] for t in tasks]
         repos = set(t.repo for t in tasks if t.enabled)
         return (tasks, repos)
 
-    def lock(*args):
+    def lock(self, *args):
         with ProcessLock('sya' + self.confdir + '-'.join(*args)):
             yield
 
@@ -405,6 +437,10 @@ def main(ctx, confdir, dryrun, verbose):
               f"'{os.path.join(confdir, DEFAULT_CONFFILE)}' "
               f"not found or not accessible.",
               file=sys.stderr)
+        raise click.Abort()
+    except InvalidConfigurationError() as e:
+        print(e)
+        raise click.Abort()
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
     cx.dryrun = dryrun
@@ -516,7 +552,7 @@ def mount(cx, repo, all, umask, item, mountpoint):
 
     if repo and not all:
         cx.error("Mounting only the last archive not implemented.")
-        sys.exit(1)
+        raise click.Abort()
 
     if repo:
         repo, _, prefix = item.partition('::')
@@ -524,18 +560,18 @@ def mount(cx, repo, all, umask, item, mountpoint):
             repo = cx.repos[item]
         except KeyError:
             cx.error(f"No such repository: '{item}'")
-            sys.exit(1)
+            raise click.Abort()
     else:
         try:
             repo = cx.tasks[item].repo
             prefix = cx.tasks[item].prefix
         except KeyError:
             cx.error(f'No such task: {item}')
-            sys.exit(1)
+            raise click.Abort()
 
     if index and all:
         cx.error(f"Giving {'^' * index} and '--all' conflict.")
-        sys.exit(1)
+        raise click.Abort()
 
     if prefix and all:
         cx.error(f"Borg doen't support mounting only archives with "
@@ -554,7 +590,7 @@ def mount(cx, repo, all, umask, item, mountpoint):
                 archive = cx.borg.list(repo, prefix,
                                        short=True, last=index + 1)[0]
             except (IndexError, BorgError):
-                sys.exit(1)
+                raise click.Abort()
             cx.info(f"-- Selected archive '{archive}'")
 
         # TODO: interactive archive selection!
