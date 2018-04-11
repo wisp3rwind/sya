@@ -15,6 +15,6 @@ setup(name='borg_sya',
 
       packages=['borg_sya'],
       entry_points={
-          'console_scripts': ['borg-sya = borg_sya:main']
+          'console_scripts': ['borg-sya = borg_sya.cli:main']
           },
       )
