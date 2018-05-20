@@ -15,6 +15,7 @@ setup(name='borg_sya',
           'borgbackup',
           'click',
           'pyyaml',
+          'blessings',
       ],
 
       packages=find_packages('src'),

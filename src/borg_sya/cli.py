@@ -1,8 +1,10 @@
+import blessings
 import click
 from contextlib import contextmanager
 import logging
 import os
 import sys
+import threading
 import time
 import traceback
 
@@ -14,6 +16,47 @@ from .util import LockInUse
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config.yaml'
 APP_NAME = 'borg-sya'
+
+
+class CLI():
+    def __init__(self):
+        self.stdout_lock = threading.Lock()
+        self.stderr_lock = threading.Lock()
+        self.term = blessings.Terminal()
+
+    @property
+    def height(self):
+        return self.term.height
+
+    @property
+    def width(self):
+        return self.term.width
+
+    def _clear_bol(self):
+        self.term.clear_bol()
+
+    def _print(self, msg):
+        pass
+
+    def _print_err(self, msg):
+        # TODO: only ever print full lines
+        pass
+
+    SPINNER_STATES = ['[' + s + ']' for s in '|/-\\']  # python's r'' strings are weird...
+    def spinner(self, status):
+        """
+        >>> with spinner("Starting...") as status:
+                # be productive
+        ...     status("x %")
+        """
+        # TODO: delete before update
+        # TODO: don't leave behind lines if interleaved with other output
+        state = itertools.cycle(SPINNER_STATES)
+        def update(status):
+            s = next(state)
+            self._clear_bol()
+            self._print_err(s + ' ' + status)
+        yield update
 
 
 @click.group()
