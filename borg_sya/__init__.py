@@ -71,7 +71,7 @@ class PrePostScript(LazyReentrantContextmanager):
         self.log = log
         self.dir = dir
 
-    def _run_script(self, script, cx, args=None, env=None):
+    def _run_script(self, script, args=None, env=None):
         if script:
             assert(isinstance(script, util.Script))
             if not self.dryrun:
@@ -105,8 +105,7 @@ class PrePostScript(LazyReentrantContextmanager):
         for script in self.post:
             # Maybe use an environment variable instead?
             # (BACKUP_STATUS=<borg returncode>)
-            self._run_script(script, "Running " + self.post_desc,
-                             args=[str(1 if type else 0)])
+            self._run_script(script, args=[str(1 if type else 0)])
 
 
 # Check if we want to run this backup task
@@ -128,12 +127,13 @@ class Repository(borg.Repository):
                  compression=None, remote_path=None, passphrase=None,
                  pre=None, pre_desc=None, post=None, post_desc=None,
                  ):
-        super().__init__(self,
-                         name, path=path,
+        self.cx = cx
+        super().__init__(name, path=path,
                          compression=compression, remote_path=remote_path,
                          passphrase=passphrase,
                          borg=cx.borg,
                          )
+        self._lock = self.cx.lock(str(self))
         self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
                                      cx.dryrun, cx.log, cx.confdir)
 
@@ -169,14 +169,11 @@ class Repository(borg.Repository):
         self.lazy = lazy
         return(self)
 
-    @if_enabled
     def __enter__(self):
-        self._lock = self.cx.lock(str(self))
         self._lock.__enter__()
         self.scripts(lazy=self.lazy).__enter__()
         self.lazy = False
 
-    @if_enabled
     def __exit__(self, *exc):
         self.scripts.__exit__(*exc)
         self._lock.__exit__(*exc)
@@ -228,15 +225,15 @@ class Task():
             # Do not load include and exclude files yet since this task might
             # not even be run.
             if include_file:
-                include_file = os.path.join(borg.confdir, include_file)
+                include_file = os.path.join(cx.confdir, include_file)
             if exclude_file:
-                exclude_file = os.path.join(borg.confdir, exclude_file)
+                exclude_file = os.path.join(cx.confdir, exclude_file)
 
             return cls(
                 name,
                 cx=cx,
                 repo=cx.repos[cfg['repository']],
-                enabled=cfg.get('run_this', True),
+                enabled=cfg.get('run-this', True),
                 prefix=cfg.get('prefix', '{hostname}'),
                 keep=keep,
                 includes=includes,
@@ -300,10 +297,10 @@ class Task():
     def prune(self):
         try:
             with self:
-                self.borg.prune(self.repo,
-                                self.keep,
-                                prefix=f'{self.prefix}-',
-                                )
+                self.cx.borg.prune(self.repo,
+                                   self.keep,
+                                   prefix=f'{self.prefix}-',
+                                   )
         except BorgError as e:
             self.cx.error(e)
             self.cx.error(f"'{self.name}' old files cleanup failed. "
@@ -337,8 +334,8 @@ class Context():
     def __init__(self, confdir, dryrun, verbose, log, repos, tasks):
         self.confdir = confdir
         self.dryrun = dryrun
-        self.verbose = verbose
         self.log = log
+        self.verbose = verbose
         self.repos = repos or dict()
         self.tasks = tasks or dict()
         self.borg = Borg(dryrun, verbose)
@@ -346,7 +343,7 @@ class Context():
     @classmethod
     def from_configuration(cls, confdir, conffile):
         logging.basicConfig(
-            format='{name}: {message}', style='}',
+            format='{name}: {message}', style='{',
             level=logging.WARNING,
         )
         log = logging.getLogger()
@@ -402,8 +399,7 @@ class Context():
         return (tasks, repos)
 
     def lock(self, *args):
-        with ProcessLock('sya' + self.confdir + '-'.join(*args)):
-            yield
+        return ProcessLock('sya' + self.confdir + '-'.join(*args))
 
     def print(self, msg):
         self.log.info(msg)

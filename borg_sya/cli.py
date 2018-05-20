@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 
 from . import InvalidConfigurationError, Context
 from .borg import BorgError
@@ -32,7 +33,7 @@ def main(ctx, confdir, dryrun, verbose):
               f"not found or not accessible.",
               file=sys.stderr)
         raise click.Abort()
-    except InvalidConfigurationError() as e:
+    except InvalidConfigurationError as e:
         print(e)
         raise click.Abort()
     if verbose:  # if True in the config file, do not set to False here
@@ -59,7 +60,7 @@ def gui(cx):
 @click.argument('tasks', nargs=-1)
 @click.pass_obj
 def create(cx, progress, tasks):
-    cx = cx.sub_context('CREATE')
+    # cx = cx.sub_context('CREATE') # TODO: implement
     for task in (tasks or cx.tasks):
         try:
             task = cx.tasks[task]
@@ -78,6 +79,9 @@ def create(cx, progress, tasks):
                              f"the repository {task.repo.name}. "
                              f"Could not create a new archive for task "
                              f"{task}.")
+                except KeyboardInterrupt as e:
+                    traceback.print_exc()
+                    raise
                 else:
                     task.prune()
                     cx.info(f'-- Done backing up {task}.')

@@ -1,12 +1,19 @@
 from functools import wraps
 import json
+import logging
 from queue import Queue
 import signal
 from subprocess import Popen, PIPE
 import sys
 from threading import Condition, Thread
 
-from .defs import (BorgError, )
+from .defs import (
+    BorgError,
+    _ERROR_MESSAGE_IDS,
+    _MESSAGE_TYPES,
+    _PROMPT_MESSAGE_IDS,
+    _OPERATION_MESSAGE_IDS,
+)
 
 from ..util import which
 
@@ -65,19 +72,24 @@ def _while_running(while_running=True):
             if (    (while_running and self._running) or
                     (not while_running and not self._running)
                     ):
-                return func(*args, **kwargs)
+                return func(self, *args, **kwargs)
             else:
                 raise RuntimeError()
         return wrapper
     return decorator
 
 
+POISON = object()
+
+
 class Borg():
 
-    def __init__(self, dryrun, verbose):
+    def __init__(self, dryrun, verbose, log=None):
         self.dryrun = dryrun
         self.verbose = verbose
         self._running = False
+        self._log = log or logging.getLogger('borg')
+        self._log_json = 'raw'
 
     def _readerthread(self, fh, name, buf, condition):
         for line in fh:
@@ -85,12 +97,13 @@ class Borg():
                 buf.put((name, line))
                 condition.notify()
         fh.close()
-        # with condition:
-        #     buf.put('finished', None)
+        with condition:
+            buf.put((name, POISON))
+            condition.notify()
 
     def _communicate_linewise(self, p, stdout=True, stderr=True):
         buf = Queue()
-        # nthreads = 0
+        nthreads = 0
         threads = []
         new_msg = Condition()
         if stdout:
@@ -99,7 +112,7 @@ class Borg():
                                    )
             stdout_thread.daemon = True
             stdout_thread.start()
-            # nthread += 1
+            nthreads += 1
             threads.append(stdout_thread)
         if stderr:
             stderr_thread = Thread(target=self._readerthread,
@@ -107,32 +120,37 @@ class Borg():
                                    )
             stderr_thread.daemon = True
             stderr_thread.start()
-            # nthread += 1
+            nthreads += 1
             threads.append(stderr_thread)
 
-        # while nthreads:
-        while all(t.is_alive() for t in threads):
+        while nthreads:
             with new_msg:
                 new_msg.wait_for(lambda: not buf.empty())
                 source, msg = buf.get()
-                if source == 'stdout':
+                if msg is POISON:
+                    nthreads -= 1
+                elif source == 'stdout':
                     yield (msg, None)
                 elif source == 'stderr':
                     yield (None, msg)
-                # elif source == 'finished':
-                #     nthreads -= 1
 
     @_while_running(False)
-    def _run(self, command, options, env=None, progress=True, output=None):
-        commandline = [BINARY, '--log-json', '--json']
+    def _run(self, command, options, env=None, progress=True, output=False):
+        commandline = [BINARY, command]
+        commandline.append('--log-json')
         if progress:
             commandline.append('--progress')
         if self.verbose:
             options.insert(0, '--verbose')
 
-        commandline.append(command)
+        outbuf = []
+        if output:
+            # Not supported by all commands
+            commandline.append('--json')
+
         commandline.extend(options)
 
+        self._log.debug(commandline)
         self._p = p = Popen(commandline, env=env,
                             stdout=PIPE, stderr=PIPE,
                             )
@@ -142,25 +160,50 @@ class Borg():
         try:
             for stdout, stderr in self._communicate_linewise(p):
                 if output and stdout is not None:
-                    output.append(stdout)
-                else:  # stderr is not None
-                    yield self.parse_json(stderr)
+                    outbuf.append(stdout)
+                elif stderr:
+                    msg = self.parse_json(stderr)
+                    if msg.get('type') == 'log_message':
+                        name = msg.get('name', '')
+                        if (name.startswith('borg.output') and name not in
+                                ['borg.output.progress']
+                                ):
+                            self._log.info(('[BORG] ' + msg.get('message', '')).rstrip('\n'))
+                    if msg:
+                        yield msg
         except Exception:
             # ?
             raise
 
         self._running = False
 
-        return(output)
+        if self._log_json == 'raw':
+            # Maybe not a good idea because this might include listings with
+            # potentially many thousand items
+            for line in outbuf:
+                self._log.debug(('[JSON OUT] ' + line.decode('utf8')).rstrip('\n'))
+
+        return(outbuf)
 
     def parse_json(self, msg):
-        msg = json.loads(msg)
+        # TODO: collect multi-line json
+        # TODO: do not accept json that is not wrapped in braces, e.g.
+        # lines like "[foo]\n"
+        if self._log_json == 'raw':
+            # Maybe not a good idea because this might include listings with
+            # potentially many thousand items
+            self._log.debug(('[JSON] ' + msg.decode('utf8')).rstrip('\n'))
 
-        if msg.type == 'log_message':
-            if hasattr(msg, 'msgid') and msg.msgid:
-                if msg.msgid in self._ERROR_MESSAGE_IDS:
-                    e = BorgError(**msg)
-                    raise e
+        try:
+            msg = json.loads(msg)
+        except json.JSONDecodeError:
+            self._log.debug(('[NOT JSON] ' + msg.decode('utf8')).rstrip('\n'))
+            return None
+
+        if msg.get('type') == 'log_message':
+            if msg.get('msgid') in _ERROR_MESSAGE_IDS:
+                e = BorgError(**msg)
+                raise e
 
         return msg
 
@@ -192,7 +235,7 @@ class Borg():
         raise NotImplementedError()
 
     def create(self, repo, includes, excludes=[],
-               prefix='{hostname}', progress_cb=None,
+               prefix='{hostname}', progress_cb=(lambda m: None),
                stats=False):
         if not includes:
             raise ValueError('No paths given to include in the archive!')
@@ -207,16 +250,15 @@ class Borg():
         options.extend(includes)
 
         with repo:
-            for msg in self._run('create', options, bool(progress_cb)):
-                if msg.type == 'log_message':
-                    if hasattr(msg, 'msgid') and msg.msgid:
-                        if msg.msgid in self._PROMPT_MESSAGE_IDS:
-                            raise RuntimeError()
-                        else:
-                            # Debug messages, ...
-                            pass
-                elif msg.type in ['progress_message', 'pogress_percent']:
-                    raise NotImplementedError()
+            for msg in self._run('create', options, progress=bool(progress_cb)):
+                if msg['type'] == 'log_message':
+                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
+                        raise RuntimeError()
+                    else:
+                        # Debug messages, ...
+                        pass
+                elif msg['type'] in ['progress_message', 'pogress_percent']:
+                    # raise NotImplementedError()
                     progress_cb(msg)
 
     def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False):
@@ -292,14 +334,13 @@ class Borg():
 
         output = []
         with repo:
-            for msg in self._run('list', options, output):
-                if msg.type == 'log_message':
-                    if hasattr(msg, 'msgid') and msg.msgid:
-                        if msg.msgid in self._PROMPT_MESSAGE_IDS:
-                            raise RuntimeError()
-                        else:
-                            # Debug messages, ...
-                            pass
+            for msg in self._run('list', options, output=output):
+                if msg['type'] == 'log_message':
+                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
+                        raise RuntimeError()
+                    else:
+                        # Debug messages, ...
+                        pass
 
         output = (json.loads(line) for line in output)
         if pandas:
@@ -328,17 +369,16 @@ class Borg():
             options.extend([f'--keep-{interval}', str(number)])
         if prefix:
             options.extend(['--prefix', prefix])
-        options.append(f"{self.repo}")
+        options.append(f"{repo}")
 
         with repo:
             for msg in self._run('prune', options):
-                if msg.type == 'log_message':
-                    if hasattr(msg, 'msgid') and msg.msgid:
-                        if msg.msgid in self._PROMPT_MESSAGE_IDS:
-                            raise RuntimeError()
-                        else:
-                            # Debug messages, ...
-                            pass
+                if msg['type'] == 'log_message':
+                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
+                        raise RuntimeError()
+                    else:
+                        # Debug messages, ...
+                        pass
 
     def recreate(self):
         raise NotImplementedError()

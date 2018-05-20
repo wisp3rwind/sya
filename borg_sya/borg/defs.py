@@ -83,25 +83,27 @@ _ALL_EXCEPTIONS = dict()
 
 
 def make_borg_error(name, msgid):
-    return type(name, (BorgError,), dict())
+    e = type(name, (BorgError,), dict())
+    _ALL_EXCEPTIONS[msgid] = e
+    return e
 
 
 class BorgError(Exception):
-    @classmethod
-    def __new__(cls, message, msgid=None, **kwargs):
+    def __new__(cls, *, message='', msgid=None, **kwargs):
         """ Return a subclass for known errors. Subclasses do not have any
         additional functionality, but are useful for catching only specific
         exceptions.
         """
         if msgid:
-            return _ALL_EXCEPTIONS[msgid].__new__(message,
-                                                  msgid=msgid,
-                                                  **kwargs)
+            return Exception.__new__(_ALL_EXCEPTIONS[msgid],
+                                     message=message,
+                                     msgid=msgid,
+                                     **kwargs)
         else:
             return super().__new__(message, msgid=msgid, **kwargs)
 
     def __init__(self, **kwargs):
-        for k, v in kwargs:
+        for k, v in kwargs.items():
             setattr(self, k, v)
 
     def __str__(self):
