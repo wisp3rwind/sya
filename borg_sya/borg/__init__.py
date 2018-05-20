@@ -257,7 +257,7 @@ class Borg():
                     else:
                         # Debug messages, ...
                         pass
-                elif msg['type'] in ['progress_message', 'pogress_percent']:
+                elif msg['type'] in ['progress_message', 'progress_percent']:
                     # raise NotImplementedError()
                     progress_cb(msg)
 
