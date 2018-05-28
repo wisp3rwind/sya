@@ -74,21 +74,17 @@ def handle_errors(cx, repo, action, action_failed):
 @click.pass_obj
 def create(cx, progress, tasks):
     # cx = cx.sub_context('CREATE') # TODO: implement
-    for task in (tasks or cx.tasks):
-        try:
-            task = cx.tasks[task]
-        except KeyError:
-            cx.error(f'-- No such task: {task}, skipping...')
-        else:
-            cx.info(f'-- Backing up using {task} configuration...')
-            with task(lazy=True):
-                with handle_errors(cx, task.repo,
-                                   f"create a new archive for task '{task}'",
-                                   f"backing up task '{task}'",
-                                   ) as status:
-                    task.create(progress)
-                    task.prune()
-            cx.info(f'-- Done backing up {task}.')
+    tasks, repos = cx.validate_tasks(tasks)
+    for task in tasks:
+        cx.info(f'-- Backing up using {task} configuration...')
+        with task(lazy=True):
+            with handle_errors(cx, task.repo,
+                               f"create a new archive for task '{task}'",
+                               f"backing up task '{task}'",
+                               ) as status:
+                task.create(progress)
+                task.prune()
+        cx.info(f'-- Done backing up {task}.')
 
 
 @main.command(help="Perform a check for repository consistency. "
@@ -154,18 +150,13 @@ def mount(cx, repo, all, umask, item, mountpoint):
 
     if repo:
         repo, _, prefix = item.partition('::')
-        try:
-            repo = cx.repos[item]
-        except KeyError:
-            cx.error(f"No such repository: '{item}'")
-            raise click.Abort()
+        repo = cx.validate_repos([item])[0]
     else:
-        try:
-            repo = cx.tasks[item].repo
-            prefix = cx.tasks[item].prefix
-        except KeyError:
-            cx.error(f'No such task: {item}')
-            raise click.Abort()
+        tasks, repos = cx.validate_tasks([item])
+        assert(len(tasks) == len(repos) == 1)
+        task = tasks[0]
+        repo = repos[0]
+        prefix = task.prefix
 
     if index and all:
         cx.error(f"Giving {'^' * index} and '--all' conflict.")
@@ -177,7 +168,7 @@ def mount(cx, repo, all, umask, item, mountpoint):
                  f"matching '{prefix}'.")
         all = False
 
-    with repo(lazy=True), with handle_errors(
+    with repo(lazy=True), handle_errors(
             cx, repo,
             "mount archive(s)"
             f"mounting repository {repo.name}."

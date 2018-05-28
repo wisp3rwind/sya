@@ -388,13 +388,21 @@ class Context():
             self.log.setLevel(logging.WARNING)
 
     def validate_repos(self, repos):
+        try:
+            repos = [self.repos[r] for r in repos]
+        except KeyError as e:
+            self.error(f'No such repository: {e}')
+            raise SystemExit()
         repos = repos or self.repos
-        repos = [self.repos[r] for r in repos]
         return repos
 
     def validate_tasks(self, tasks):
+        try:
+            tasks = [self.tasks[t] for t in tasks]
+        except KeyError as e:
+            self.error(f'No such task: {e}')
+            raise SystemExit()
         tasks = tasks or self.tasks
-        tasks = [self.tasks[t] for t in tasks]
         repos = set(t.repo for t in tasks if t.enabled)
         return (tasks, repos)
 
