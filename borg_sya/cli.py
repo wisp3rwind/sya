@@ -54,6 +54,19 @@ def gui(cx):
     gui_main(cx)
 
 
+def handle_errors(cx, repo, action, action_failed):
+    try:
+        yield
+    except BorgError as e:
+        cx.error(f"Error {e} when {action_failed}.\nYou should investigate.")
+    except LockInUse as e:
+        cx.error(f"Another process seems to be accessing the "
+                 f"repository {repo.name}. Could not {action}.")
+    except KeyboardInterrupt as e:
+        traceback.print_exc()
+        raise
+
+
 @main.command(help="Do a backup run. If no Task is specified, run all.")
 @click.option('-p', '--progress/--no-progress',
               help="Show progress.")
@@ -69,22 +82,13 @@ def create(cx, progress, tasks):
         else:
             cx.info(f'-- Backing up using {task} configuration...')
             with task(lazy=True):
-                try:
+                with handle_errors(cx, task.repo,
+                                   f"create a new archive for task '{task}'",
+                                   f"backing up task '{task}'",
+                                   ) as status:
                     task.create(progress)
-                except BorgError as e:
-                    cx.error(f"'{task}' backup failed. "
-                             f"You should investigate.")
-                except LockInUse:
-                    cx.error(f"-- Another process seems to be accessing "
-                             f"the repository {task.repo.name}. "
-                             f"Could not create a new archive for task "
-                             f"{task}.")
-                except KeyboardInterrupt as e:
-                    traceback.print_exc()
-                    raise
-                else:
                     task.prune()
-                    cx.info(f'-- Done backing up {task}.')
+            cx.info(f'-- Done backing up {task}.')
 
 
 @main.command(help="Perform a check for repository consistency. "
@@ -105,17 +109,12 @@ def check(cx, progress, repo, items):
 
     for repo in repos:
         cx.info(f'-- Checking repository {repo.name}...')
-        try:
+        with handle_errors(cx, repo,
+                           "check it",
+                           f"Error {e} when checking repository {repo.name}."
+                           ):
             repo.check()
-        except BorgError as e:
-            cx.error(f"-- Error {e} when checking repository {repo.name}."
-                     f"You should investigate.")
-        except LockInUse as e:
-            cx.error(f"-- Another process seems to be accessing the "
-                     f"repository {repo.name}. Could not check it.")
-            continue
-        else:
-            cx.info(f'-- Done checking {repo.name}.')
+        cx.info(f'-- Done checking {repo.name}.')
 
 
 @main.command(help="Mount a snapshot. Takes a repository or task and the "
@@ -178,17 +177,21 @@ def mount(cx, repo, all, umask, item, mountpoint):
                  f"matching '{prefix}'.")
         all = False
 
-    with repo(lazy=True):
+    with repo(lazy=True), with handle_errors(
+            cx, repo,
+            "mount archive(s)"
+            f"mounting repository {repo.name}."
+            ):
         archive = None
         if not all:
             cx.info(f"-- Searching for last archive from "
                     f"repository '{repo.name}' with prefix '{prefix}'.")
             try:
                 # short will only output archive names,
-                # last return only the index+1 most recent archives
+                # last returns only the index+1 most recent archives
                 archive = cx.borg.list(repo, prefix,
                                        short=True, last=index + 1)[0]
-            except (IndexError, BorgError):
+            except IndexError:
                 raise click.Abort()
             cx.info(f"-- Selected archive '{archive}'")
 
@@ -201,10 +204,6 @@ def mount(cx, repo, all, umask, item, mountpoint):
             # to run post-scripts (e.g. umount), this is not sensible and we
             # set foreground to True.
             cx.borg.mount(repo, archive, mountpoint, foreground=True)
-        except BorgError as e:
-            cx.error(f"-- Mounting '{repo.name}' failed: \n"
-                     f"{e}\n"
-                     f"You should investigate.")
         except KeyboardInterrupt:
             while True:
                 try:
@@ -216,6 +215,7 @@ def mount(cx, repo, all, umask, item, mountpoint):
                     if 'failed to unmount' in str(e):
                         # Might fail if this happens to quickly after mounting.
                         time.sleep(2)
-                        continue
+                    else:
+                        raise
 
             cx.info('-- Done unmounting (the FUSE driver has exited).')
