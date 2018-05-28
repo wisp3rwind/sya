@@ -257,6 +257,46 @@ class Borg():
     def init(self):
         raise NotImplementedError()
 
+    # borg-check also takes an archive instead of a full repo as argument, this
+    # is not supported here fore now.
+    def check(self, repo,
+              repos_only=False, archives_only=False,
+              verify_data=False, repair=False, save_space=False,
+              prefix=None, glob=None, sort_by=None, first=0, last=0,
+              progress_cb=(lambda m: None),
+              ):
+        if repos_only and verify_data:
+            raise ValueError('borg-check options --repository-only and '
+                             '--verify-data conflict!')
+
+        options = repo.borg_args()
+        if repos_only: options.append('--repository-only')
+        if archives_only: options.append('--archives-only')
+        if verify_data: options.append('--verify-data')
+        if repair: options.append('--repair')
+        if save_space: options.append('--save-space')
+        if prefix: options.extend(['--prefix', prefix])
+        if glob: options.extend(['--glob', glob])
+        if sort_by:
+            if not all(s in ['timestamp', 'name', 'id'] for s in sort_by.split(',')):
+                raise ValueError()
+            options.extend(['--sort-by', sort_by])
+        if first: options.extend(['--first', str(int(first))])
+        if last: options.extend(['--last', str(int(last))])
+        options.append(f"{repo}")
+
+        with repo:
+            for msg in self._run('check', options, progress=bool(progress_cb)):
+                if msg['type'] == 'log_message':
+                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
+                        raise RuntimeError()
+                    else:
+                        # Debug messages, ...
+                        pass
+                elif msg['type'] in ['progress_message', 'progress_percent']:
+                    # raise NotImplementedError()
+                    progress_cb(msg)
+
     def create(self, repo, includes, excludes=[],
                prefix='{hostname}', progress_cb=(lambda m: None),
                stats=False):
