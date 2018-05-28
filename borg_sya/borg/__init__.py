@@ -89,9 +89,9 @@ class Borg():
         self.verbose = verbose
         self._running = False
         self._log = log or logging.getLogger('borg')
-        self._log_json = 'raw'
+        self._log_json = False # 'raw'
 
-    def _readerthread(self, fh, name, json, buf, condition):
+    def _readerthread(self, fh, name, as_json, buf, condition):
         """ Reads either raw lines or JSON objects from the given stream. If
             reading JSON and the first line starts with an opening brace,
             subsequent lines will be aggregated until a valid JSON object
@@ -100,14 +100,14 @@ class Borg():
         """
         def _pass_msg(msg):
             with condition:
-                buf.put((name, line))
+                buf.put((name, msg))
                 condition.notify()
 
-        if json:
-            previous = ""
+        if as_json:
+            previous = b""
             for line in fh:
                 line = previous + line
-                if line.lstrip().startswith('{'):
+                if line.lstrip().startswith(b'{'):
                     try:
                         msg = json.loads(line)
                     except json.JSONDecodeError:
@@ -115,17 +115,17 @@ class Borg():
                         # Then, a decoding error simply means that not all of
                         # the JSON was read yet, i.e. borg has split it over
                         # multiple lines.
-                        previous = line + '\n'
+                        previous = line + b'\n'
                     else:
-                        previous = ""
+                        previous = b""
                         if self._log_json == 'raw':
                             # Maybe not a good idea because this might include
                             # listings with potentially many thousand items
-                            self._log.debug(('[JSON] ' + msg.decode('utf8')).rstrip('\n'))
+                            self._log.debug(('[JSON] ' + line.decode('utf8')).rstrip('\n'))
                         _pass_msg(msg)
                 else:
                     # Not JSON
-                    self._log.debug(('[NOT JSON] ' + msg.decode('utf8')).rstrip('\n'))
+                    self._log.debug(('[NOT JSON] ' + line.decode('utf8')).rstrip('\n'))
                     return None
                     # _pass_msg(line)
         else:
@@ -171,6 +171,7 @@ class Borg():
                 elif source == 'stderr':
                     yield (None, msg)
 
+    # TODO check `man borg-common` for more arguments to support
     @_while_running(False)
     def _run(self, command, options, env=None, progress=True, output=False):
         commandline = [BINARY, command]
@@ -200,6 +201,7 @@ class Borg():
                 if output and stdout is not None:
                     outbuf.append(stdout)
                 elif stderr:
+                    msg = stderr
                     if msg.get('type') == 'log_message':
                         if msg.get('msgid') in _ERROR_MESSAGE_IDS:
                             # Does this always mean that there was a fatal
@@ -208,7 +210,7 @@ class Borg():
                             e = BorgError(**msg)
                             raise e
                         name = msg.get('name', '')
-                        if (name.startswith('borg.output') and name not in
+                        if (name.startswith('borg.') and name not in
                                 ['borg.output.progress']
                                 ):
                             self._log.info(('[BORG] ' + msg.get('message', '')).rstrip('\n'))
