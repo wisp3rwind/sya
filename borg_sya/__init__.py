@@ -136,6 +136,7 @@ class Repository(borg.Repository):
         self._lock = self.cx.lock(str(self))
         self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
                                      cx.dryrun, cx.log, cx.confdir)
+        self.lazy = False
 
     @classmethod
     def from_yaml(cls, name, cfg, cx):

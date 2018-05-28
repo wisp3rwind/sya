@@ -1,4 +1,5 @@
 import click
+from contextlib import contextmanager
 import logging
 import os
 import sys
@@ -54,6 +55,7 @@ def gui(cx):
     gui_main(cx)
 
 
+@contextmanager
 def handle_errors(cx, repo, action, action_failed):
     try:
         yield
@@ -107,7 +109,7 @@ def check(cx, progress, repo, items):
         cx.info(f'-- Checking repository {repo.name}...')
         with handle_errors(cx, repo,
                            "check it",
-                           f"Error {e} when checking repository {repo.name}."
+                           f"when checking repository {repo.name}."
                            ):
             repo.check()
         cx.info(f'-- Done checking {repo.name}.')
