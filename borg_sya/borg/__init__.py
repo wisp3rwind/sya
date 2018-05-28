@@ -128,7 +128,7 @@ class Borg():
                     self._log.debug(('[NOT JSON] ' + msg.decode('utf8')).rstrip('\n'))
                     return None
                     # _pass_msg(line)
-j       else:
+        else:
             for line in fh:
                 _pass_msg(line)
         fh.close()
