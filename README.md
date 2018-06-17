@@ -1,17 +1,23 @@
 # Overview
 
 [`Sya`][2] is a very basic frontend to [`borg`][1]. Its goal is to
-provide easy management of multiple independent backup tasks.
+provide easy management of multiple independent backup tasks with an intuitive
+commandline interface. A graphical interface is planned.
+
+## Under the hood & historical remarks
 Basically, it constructs `borg` command lines from repository and task
-specifications given in a configuration file.
+specifications given in a configuration file. Then, the JSON interface to
+`borg`'s output is used to build a humanly-manageable tool.
 
 While this started as a fork of @niol's tool, there's essentially no
 compatibility to his original version and almost all of the code has seen
 significant changes:
-* the configuration file is YAML instead of INI
-* the CLI is entirely different (subcommands, etc.)
-* **this README is hopelessly out of date**
-* it is very much WIP, breaking changes are expected
+- [x] **this README is hopelessly out of date**
+- [x] the configuration file is YAML instead of INI
+- [x] the CLI is entirely different (subcommands, etc.)
+- [x] it is very much WIP, breaking changes are expected
+- [ ] GUI (in addition to the commandline)
+- [ ] Desktop notifications
 
  [1]: https://borgbackup.readthedocs.io/
  [2]: https://github.com/niol/sya
