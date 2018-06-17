@@ -4,3 +4,5 @@ venv
 __pycache__
 *.~undo-tree~.gz
 *.*~
+.pytest_cache
+.tox
