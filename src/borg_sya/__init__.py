@@ -166,6 +166,12 @@ class Repository(borg.Repository):
             post_desc=f'unmount script for repository {name}',
         )
 
+    def to_yaml(self):
+        return NotImplementedError()
+
+    def __equal__(self, other):
+        return NotImplementedError()
+
     def __call__(self, *, lazy=False):
         self.lazy = lazy
         return(self)
@@ -248,6 +254,12 @@ class Task():
             )
         except (KeyError, ValueError, TypeError) as e:
             raise InvalidConfigurationError(str(e))
+
+    def to_yaml(self):
+        return NotImplementedError()
+
+    def __equal__(self, other):
+        return NotImplementedError()
 
     def __str__(self):
         return(self.name)
