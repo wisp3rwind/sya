@@ -66,6 +66,9 @@ class Repository():
 
 
 def _while_running(while_running=True):
+    """Decorator that ensures that a single Borg instance can only ever spawn
+    and interact with one borg process at a time.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -79,10 +82,95 @@ def _while_running(while_running=True):
     return decorator
 
 
+class DefaultHandlers():
+    """State machine base class for handling any status emitted by borg or
+    user interaction. The implementation is very basic, actual interaction
+    (e.g. reacting to prompts by borg) need to be handled in sublasses.
+
+    What the base class does is some basic dispatching based on message type
+    and content. It also passes the contents of the bare json as keyword
+    arguments.
+
+    """
+    handles_progress = False
+
+    def _dispatch(self, borg, msg):
+        if msg.get('type') == 'log_message':
+            name = msg.get('name')
+            if msg.get('msgid') in _ERROR_MESSAGE_IDS:
+                f = self.onError
+            elif msg.get('msgid') in _PROMPT_MESSAGE_IDS:
+                f = self.onPrompt
+            # elif msg.get('msgid') in _OPERATION_MESSAGE_IDS:
+            #     pass
+            elif name.startswith('borg.'):
+                f = self.onBorgOutput
+            else:
+                # Debug messages, ...
+                f = self.onOtherMessage
+        # TODO: Maybe combine progress_message/_percent into one handler
+        # onProgress(message=msg.get("msgcontent", ""), percent=msg.get("percent", None), **...)
+        elif msg['type'] == 'progress_message':
+            f = self.onProgressMessage
+        elif msg['type'] == 'progress_percent':
+            f = self.onProgressPercent
+        elif msg['type'] == 'archive_progress':
+            f = self._onUnhandled
+        elif msg['type'] == 'file_status':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_prompt':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_prompt_retry':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_invalid_answer':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_accepted_default':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_accepted_true':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_accepted_false':
+            f = self._onUnhandled
+        elif msg['type'] == 'question_env_answer':
+            f = self._onUnhandled
+
+        f(borg, **msg)
+
+    def _onUnhandled(self, borg, **msg):
+        # TODO: maybe debug-log unhandled messages?
+        pass
+
+    def onError(self, borg, **msg):
+        # Does this always mean that there was a fatal error, or would it be
+        # sensible to communicate this to the outside in a reentrant way?
+        raise BorgError(**msg)
+
+    def onBorgOutput(self, borg, **msg):
+        """Receives the messages that borg would write to sterr on a standard
+        (non-JSON) CLI session
+        """
+        # TODO: should these messages be passed on?
+        if msg.get('name') not in ['borg.output.progress']:
+            borg._log.info(f"[BORG] {msg.get('message', '')}".rstrip('\n'))
+
+    def onProgressMessage(self, borg, **msg):
+        pass
+
+    def onProgressPercent(self, borg, **msg):
+        pass
+
+    def onPrompt(self, borg, **msg):
+        raise RuntimeError()
+
+    def onOtherMessage(self, borg, **msg):
+        pass
+
+
 POISON = object()
 
 
 class Borg():
+
+    _HANDLERS = DefaultHandlers()
 
     def __init__(self, dryrun, verbose, log=None):
         self.dryrun = dryrun
@@ -97,6 +185,8 @@ class Borg():
             subsequent lines will be aggregated until a valid JSON object
             results. Anything not wrapped in braces will not be considered
             to be JSON and will be dropped with an entry to the debug log.
+
+            Yields POISON when encountering the end of the stream.
         """
         def _pass_msg(msg):
             with condition:
@@ -115,6 +205,9 @@ class Borg():
                         # Then, a decoding error simply means that not all of
                         # the JSON was read yet, i.e. borg has split it over
                         # multiple lines.
+                        # TODO: This is probably not very efficient. Maybe only
+                        # try to load the json when opening { and closing }
+                        # match? Otoh, most of the json is one-line.
                         previous = line + b'\n'
                     else:
                         previous = b""
@@ -135,6 +228,9 @@ class Borg():
         _pass_msg(POISON)
 
     def _communicate(self, p, stdout='raw', stderr='raw'):
+        """Similar to Popen.communicate, but without the deadlocks when both
+        stdout and stderr are written to.
+        """
         buf = Queue()
         nthreads = 0
         threads = []
@@ -151,7 +247,7 @@ class Borg():
             threads.append(stdout_thread)
         if stderr in ['raw', 'json']:
             stderr_thread = Thread(target=self._readerthread,
-                                   args=(p.stderr, 
+                                   args=(p.stderr,
                                          'stderr', stderr == 'json',
                                          buf, new_msg),
                                    )
@@ -173,10 +269,17 @@ class Borg():
 
     # TODO check `man borg-common` for more arguments to support
     @_while_running(False)
-    def _run(self, command, options, env=None, progress=True, output=False):
+    def _run(self, command, options, env=None, progress=True, output=False,
+             handlers=None):
+        """Run a borg commandline (possibly after extending it with a number
+        of common arguments given as parameters to this function). Messages
+        from borg are read as JSON and dispatched to the `handlers`.
+        """
+        handlers = handlers or self._HANDLERS
+
         commandline = [BINARY, command]
         commandline.append('--log-json')
-        if progress:
+        if progress or handlers.handles_progress:
             commandline.append('--progress')
         if self.verbose:
             options.insert(0, '--verbose')
@@ -195,30 +298,12 @@ class Borg():
 
         self._running = True
 
-        try:
-            for stdout, stderr in self._communicate(p, stdout='raw',
-                                                    stderr='json'):
-                if output and stdout is not None:
-                    outbuf.append(stdout)
-                elif stderr:
-                    msg = stderr
-                    if msg.get('type') == 'log_message':
-                        if msg.get('msgid') in _ERROR_MESSAGE_IDS:
-                            # Does this always mean that there was a fatal
-                            # error, or would it be sensible to communicate
-                            # this to the outside in a reentrant way?
-                            e = BorgError(**msg)
-                            raise e
-                        name = msg.get('name', '')
-                        if (name.startswith('borg.') and name not in
-                                ['borg.output.progress']
-                                ):
-                            self._log.info(('[BORG] ' + msg.get('message', '')).rstrip('\n'))
-                    if msg:
-                        yield msg
-        except Exception:
-            # ?
-            raise
+        for stdout, msg in self._communicate(p, stdout='raw',
+                                                stderr='json'):
+            if output and stdout is not None:
+                outbuf.append(stdout)
+            elif msg:
+                handlers._dispatch(self, stderr)
 
         self._running = False
 
@@ -263,7 +348,7 @@ class Borg():
               repos_only=False, archives_only=False,
               verify_data=False, repair=False, save_space=False,
               prefix=None, glob=None, sort_by=None, first=0, last=0,
-              progress_cb=(lambda m: None),
+              handlers=None,
               ):
         if repos_only and verify_data:
             raise ValueError('borg-check options --repository-only and '
@@ -286,20 +371,11 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            for msg in self._run('check', options, progress=bool(progress_cb)):
-                if msg['type'] == 'log_message':
-                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
-                        raise RuntimeError()
-                    else:
-                        # Debug messages, ...
-                        pass
-                elif msg['type'] in ['progress_message', 'progress_percent']:
-                    # raise NotImplementedError()
-                    progress_cb(msg)
+            self._run('check', options, handlers=handlers)
 
     def create(self, repo, includes, excludes=[],
-               prefix='{hostname}', progress_cb=(lambda m: None),
-               stats=False):
+               prefix='{hostname}', stats=False,
+               handlers=None):
         if not includes:
             raise ValueError('No paths given to include in the archive!')
 
@@ -313,18 +389,10 @@ class Borg():
         options.extend(includes)
 
         with repo:
-            for msg in self._run('create', options, progress=bool(progress_cb)):
-                if msg['type'] == 'log_message':
-                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
-                        raise RuntimeError()
-                    else:
-                        # Debug messages, ...
-                        pass
-                elif msg['type'] in ['progress_message', 'progress_percent']:
-                    # raise NotImplementedError()
-                    progress_cb(msg)
+            self._run('create', options, handlers=handlers)
 
-    def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False):
+    def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False,
+              handlers=None):
         raise NotImplementedError()
         options = repo.borg_args()
         if foreground:
@@ -337,25 +405,19 @@ class Borg():
         options.append(target)
 
         with repo:
-            for msg in self._run('mount', options):
-                if msg.type == 'log_message':
-                    if hasattr(msg, 'msgid') and msg.msgid:
-                        if msg.msgid in self._PROMPT_MESSAGE_IDS:
-                            raise RuntimeError()
-                        else:
-                            # Debug messages, ...
-                            pass
+            self._run('mount', options, handlers=handlers)
 
-    def umount(self):
+    def umount(self, repo, handlers=None):
         raise NotImplementedError()
 
-    def extract(self):
+    def extract(self, repo, handlers=None):
         raise NotImplementedError()
 
     def list(self, repo,
              prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
-             sort_by='', additional_keys=[], pandas=True, short=False):
+             sort_by='', additional_keys=[], pandas=True, short=False,
+             handlers=None):
         # NOTE: This can list either repo contents (archives) or archive
         # contents (files). Respect that, maybe even split in separate methods
         # (since e.g. repos should have the 'short' option to only return the
@@ -397,13 +459,7 @@ class Borg():
 
         output = []
         with repo:
-            for msg in self._run('list', options, output=output):
-                if msg['type'] == 'log_message':
-                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
-                        raise RuntimeError()
-                    else:
-                        # Debug messages, ...
-                        pass
+            self._run('list', options, output=output, handlers=handlers)
 
         output = (json.loads(line) for line in output)
         if pandas:
@@ -415,13 +471,14 @@ class Borg():
         else:
             return list(output)
 
-    def info(self):
+    def info(self, repo, handlers=None):
         raise NotImplementedError()
 
-    def delete(self):
+    def delete(self, repo, handlers=None):
         raise NotImplementedError()
 
-    def prune(self, repo, keep, prefix=None, verbose=True):
+    def prune(self, repo, keep, prefix=None, verbose=True,
+              handlers=None):
         if not keep:
             raise ValueError('No archives to keep given for pruning!')
         options = repo.borg_args()
@@ -435,13 +492,7 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            for msg in self._run('prune', options):
-                if msg['type'] == 'log_message':
-                    if msg.get('msgid') in _PROMPT_MESSAGE_IDS:
-                        raise RuntimeError()
-                    else:
-                        # Debug messages, ...
-                        pass
+            self._run('prune', options, handlers=handlers)
 
-    def recreate(self):
+    def recreate(self, handlers=None):
         raise NotImplementedError()
