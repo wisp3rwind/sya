@@ -2,7 +2,7 @@ import click
 from click.testing import CliRunner
 import pytest
 
-import borg_sya.cli cli
+import borg_sya.cli as cli
 
 
 @pytest.fixture
