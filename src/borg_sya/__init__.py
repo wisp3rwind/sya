@@ -167,7 +167,20 @@ class Repository(borg.Repository):
         )
 
     def to_yaml(self):
-        return NotImplementedError()
+        """ NOTE: This doesn't round-trip, since defaults and any information
+        (passphrase for now) that were read from included files will end up in
+        the output.
+        """
+        out = {
+            'path': self.path,
+        }
+        if self.passphrase: out['passphrase'] = self.passphrase
+        if self.compression: out['compression'] = self.compression
+        if self.remote_path: out['remote-path'] = self.remote_path
+        if self.scripts.pre: out['mount'] = self.scripts.pre
+        if self.scripts.post: out['umount'] = self.scripts.post
+
+        return out
 
     def __equal__(self, other):
         return NotImplementedError()
@@ -223,12 +236,14 @@ class Task():
             if not all(k in cls.KEEP_INTERVALS for k in keep):
                 raise InvalidConfigurationError()
 
-            include_file = cfg.get('include_file', None)
-            exclude_file = cfg.get('exclude_file', None)
+            include_file = cfg.get('include-file', None)
+            exclude_file = cfg.get('exclude-file', None)
             includes = cfg.get('includes', [])
             if not includes and not include_file:
-                raise InvalidConfigurationError(f"'paths' is mandatory in "
-                                                "configuration file {name}")
+                raise InvalidConfigurationError(
+                        f"Either 'includes' or 'include-fle' is mandatory in "
+                        f"configuration file {name}"
+                        )
             # Do not load include and exclude files yet since this task might
             # not even be run.
             if include_file:
@@ -256,7 +271,22 @@ class Task():
             raise InvalidConfigurationError(str(e))
 
     def to_yaml(self):
-        return NotImplementedError()
+        """ NOTE: This doesn't round-trip, since defaults are not written to
+        the output.
+        """
+        out = {
+            'repository': self.repo.name,
+            'run-this': self.enabled,
+        }
+        if self.keep: out['keep'] = self.keep
+        if self.includes: out['includes'] = self.includes
+        if self.include_file: out['include-file'] = self.include_file
+        if self.exclude_file: out['exclude-file'] = self.exclude_file
+        if self.prefix != '{hostname}': out['prefix'] = self.prefix
+        if self.scripts.pre: out['pre'] = self.scripts.pre
+        if self.scripts.post: out['post'] = self.scripts.post
+
+        return out
 
     def __equal__(self, other):
         return NotImplementedError()

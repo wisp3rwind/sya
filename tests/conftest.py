@@ -35,17 +35,29 @@ def make_config():
         if verbose:
             cfg['sya']['verbose'] = True
 
-        with tempfile.TemporaryDirectory() as confdir:
+        with tempfile.TemporaryDirectory() as d:
+            confdir = os.path.join(d, "config")
             rname = random_strings(1)[0]
+            rname = f"repo-{rname}"
+            rdir = os.path.join(d, rname)
             repo = Repository(
                     name=rname,
+                    path=rdir,
+                    cx=None,
+                    compression=None,
+                    passphrase=None,
+                    pre=None,
+                    pre_desc=None,
+                    post=None,
+                    post_desc=None,
                     )
             cfg['repositories'][rname] = repo.to_yaml()
             if create_repo:
-                os.mkdir(os.path.join(confdir, 'backup', rname)
+                os.mkdir(rdir)
 
             tnames = random_strings(ntasks)
             for name in tnames:
+                name = f"task-{name}"
                 task = Task(
                     name=name,
                     cx=None,
