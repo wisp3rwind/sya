@@ -208,7 +208,7 @@ class Task():
 
     def __init__(self, name, cx,
                  repo, enabled, prefix, keep,
-                 includes, include_file, exclude_file,
+                 includes, include_file, exclude_file, path_prefix,
                  pre, pre_desc, post, post_desc,
                  ):
         self.name = name
@@ -220,6 +220,7 @@ class Task():
         self.includes = includes
         self.include_file = include_file
         self.exclude_file = exclude_file
+        self.path_prefix = path_prefix
 
         self.lazy = False
         self.scripts = PrePostScript(pre, pre_desc, post, post_desc,
@@ -261,6 +262,7 @@ class Task():
                 includes=includes,
                 include_file=include_file,
                 exclude_file=exclude_file,
+                path_prefix=cfg.get('path-prefix', '')
                 # PrePostScript args
                 pre=cfg.get('pre', None),
                 pre_desc=f"'{name}' pre-backup script",
@@ -325,6 +327,13 @@ class Task():
         if self.exclude_file:
             with open(self.exclude_file) as f:
                 excludes.extend(f.readlines())
+
+        assert(all(os.path.isabs(i) for i in includes))
+        assert(all(os.path.isabs(e) for e in excludes))
+
+        if self.path_prefix:
+            includes = [os.path.join(self.path_prefix, i) for i in includes]
+            excludes = [os.path.join(self.path_prefix, e) for e in excludes]
 
         # run the backup
         with self:
