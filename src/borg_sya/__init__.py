@@ -330,8 +330,7 @@ class Task():
         with self:
             self.cx.borg.create(
                 self.repo,
-                [i.strip() for i in includes],
-                [e.strip() for e in excludes],
+                includes, excludes,
                 prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
                 stats=True,
             )
