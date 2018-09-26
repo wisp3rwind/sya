@@ -15,33 +15,29 @@ class TestMockedCLI():
     being run.
     """
     def test_create(self):
-        pass
+        raise NotImplementedError()
 
     def test_check_ok(self):
-        pass
+        raise NotImplementedError()
 
     def test_check_fail(self):
-        pass
+        raise NotImplementedError()
 
     def test_mount(self):
-        pass
+        raise NotImplementedError()
 
 
 class TestFullCLI():
     """ Actually runs borg, otherwise the same as the mocked class.
     """
-    def test_create(self, make_config, runner):
-        confdir, cfg = make_config()
-        runner.invoke(cli.main, ['-d', confdir, 'create', cfg['tasks'][0]])
+    def test_create(self, simple_cfg, runner):
+        runner.invoke(cli.main, ['-d', confdir, 'create', simple_cfg['tasks'][0]])
 
-    def test_check_ok(self, make_config, runner):
-        confdir, cfg = make_config()
-        pass
+    def test_check_ok(self, simple_cfg, runner):
+        raise NotImplementedError()
 
-    def test_check_fail(self, make_config, runner):
-        confdir, cfg = make_config()
-        pass
+    def test_check_fail(self, simple_cfg, runner):
+        raise NotImplementedError()
 
-    def test_mount(self, make_config, runner):
-        confdir, cfg = make_config()
-        pass
+    def test_mount(self, simple_cfg, runner):
+        raise NotImplementedError()

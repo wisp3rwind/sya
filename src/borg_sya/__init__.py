@@ -381,7 +381,9 @@ class Context():
         self.verbose = verbose
         self.repos = repos or dict()
         self.tasks = tasks or dict()
-        self.borg = Borg(dryrun, verbose)
+
+    def attach_borg():
+        self.borg = Borg(self.dryrun, self.verbose)
 
     @classmethod
     def from_configuration(cls, confdir, conffile):
@@ -418,6 +420,10 @@ class Context():
                     }
 
         return cx
+    
+    @classmethod
+    def to_configuration(cls, confdir, conffile):
+        raise NotImplementedError()
 
     @property
     def verbose(self):
@@ -425,10 +431,11 @@ class Context():
 
     @verbose.setter
     def verbose(self, value):
-        if value:
-            self.log.setLevel(logging.DEBUG)
-        else:
-            self.log.setLevel(logging.WARNING)
+        if self.log:
+            if value:
+                self.log.setLevel(logging.DEBUG)
+            else:
+                self.log.setLevel(logging.WARNING)
 
     def validate_repos(self, repos):
         try:
@@ -453,16 +460,20 @@ class Context():
         return ProcessLock('sya' + self.confdir + '-'.join(*args))
 
     def print(self, msg):
-        self.log.info(msg)
-        print(msg)
+        if self.log:
+            self.log.info(msg)
+            print(msg)
 
     def info(self, msg):
-        self.log.info(msg)
+        if self.log:
+            self.log.info(msg)
 
     def warning(self, msg):
-        self.log.warning(msg)
+        if self.log:
+            self.log.warning(msg)
 
     def error(self, msg):
-        self.log.error(msg)
+        if self.log:
+            self.log.error(msg)
 
 # vim: ts=4 sw=4 expandtab

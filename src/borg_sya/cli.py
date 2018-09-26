@@ -40,6 +40,7 @@ def main(ctx, confdir, dryrun, verbose):
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
     cx.dryrun = dryrun
+    cx.attach_borg()
     ctx.obj = cx
 
 
@@ -118,7 +119,7 @@ def check(cx, progress, repo, items):
 @main.command(help="Mount a snapshot. Takes a repository or task and the "
                    "mountpoint as positional arguments. If a repository, "
                    "a prefix can "
-                   "be speified as 'repo::prefix'. Optionally append an "
+                   "be specified as 'repo::prefix'. Optionally append an "
                    "arbitrary number of '^' to choose the last, next-to "
                    "last or earlier archives. Otherwise, all matching "
                    "archives will be mounted.")
@@ -126,6 +127,9 @@ def check(cx, progress, repo, items):
 # --repo name::prefix^^ -> repo, prefix
 # --task name[^[^ ...]] -> repo, prefix
 # --before=2017-02-01T12:45:10
+# Maybe change syntax to repo::prefix::{,0,-1,1,-2,2}
+#   for {last,first,last,second,second-to-last,third} and so on?
+#   -> can prefixes contain colons? If so, maybe prefer repo::prefix -1
 @click.option(
     '-r/-t', '--repo/--task', 'repo',
     help="Whether to select archives for a repository or task. "

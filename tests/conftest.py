@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import yaml
 
-from borg_sya import Task, Repository
+from borg_sya import Task, Repository, Context
 
 def random_strings(number, length=6):
     """Return a number of unique random strings to be used as names for
@@ -43,7 +43,7 @@ def make_config():
             repo = Repository(
                     name=rname,
                     path=rdir,
-                    cx=None,
+                    cx=Context(confdir, False, verbose, None, None, None),
                     compression=None,
                     passphrase=None,
                     pre=None,
@@ -88,3 +88,30 @@ def make_config():
             yield confdir, cfg
 
     return _make_config
+
+
+@pytest.fixture
+def _simple_cfg(make_config):
+    yield from make_config(ntasks=1)
+
+
+@pytest.fixture
+def confdir(_simple_cfg):
+    for c in _simple_cfg:
+        yield c[0]
+
+
+@pytest.fixture
+def simple_cfg(_simple_cfg):
+    for c in _simple_cfg:
+        yield c[1]
+
+@pytest.fixture(scope='package')
+def important_data():
+    with tempfile.TemporaryDirectory() as d:
+        for i in range(3):
+            fh, fn = tempfile.mkstemp(dir=d)
+            os.close(fh)
+            with open(fn, 'wb') as fh:
+                fh.write(os.urandom(10000))
+        yield d
