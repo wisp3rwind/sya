@@ -13,6 +13,7 @@ from .defs import (
     _MESSAGE_TYPES,
     _PROMPT_MESSAGE_IDS,
     _OPERATION_MESSAGE_IDS,
+    _VERBOSITY_OPTIONS,
 )
 from .helpers import (
     format_file_size,
@@ -95,7 +96,11 @@ class DefaultHandlers():
     arguments.
 
     """
-    handles_progress = False
+    # The following flags control a number of common options that will be
+    # passed to borg, such as `--progress`, `--verbose`, etc.
+    # Cf. `man borg-common`.
+    handles_progress = True
+    wants_loglevel = logging.INFO
 
     def _dispatch(self, borg, msg):
         if msg.get('type') == 'log_message':
@@ -190,11 +195,10 @@ class Borg():
 
     _HANDLERCLASS = DefaultHandlers
 
-    def __init__(self, dryrun, verbose, log=None):
+    def __init__(self, dryrun, log=None):
         self.dryrun = dryrun
-        self.verbose = verbose
         self._running = False
-        self._log = log or logging.getLogger('borg')
+        self._log = log if log else logging.getLogger('borg')
         self._log_json = False # 'raw'
 
     def _readerthread(self, fh, name, as_json, buf, condition):
@@ -287,8 +291,8 @@ class Borg():
 
     # TODO check `man borg-common` for more arguments to support
     @_while_running(False)
-    def _run(self, command, options, env=None, progress=True, output=False,
-             handlers=None):
+    def _run(self, command, options, env=None, output=False,
+             handlerclass=None):
         """Run a borg commandline (possibly after extending it with a number
         of common arguments given as parameters to this function). Messages
         from borg are read as JSON and dispatched to the `handlers`.
@@ -297,10 +301,11 @@ class Borg():
 
         commandline = [BINARY, command]
         commandline.append('--log-json')
-        if progress or handlers.handles_progress:
+        if handlers.handles_progress:
             commandline.append('--progress')
-        if self.verbose:
-            options.insert(0, '--verbose')
+        verbosity_flag = _VERBOSITY_OPTIONS[handlers.wants_loglevel]
+        if verbosity_flag:
+            options.insert(0, verbosity_flag)
 
         outbuf = []
         if output:
@@ -366,7 +371,7 @@ class Borg():
               repos_only=False, archives_only=False,
               verify_data=False, repair=False, save_space=False,
               prefix=None, glob=None, sort_by=None, first=0, last=0,
-              handlers=None,
+              handlerclass=None,
               ):
         if repos_only and verify_data:
             raise ValueError('borg-check options --repository-only and '
@@ -389,11 +394,11 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            self._run('check', options, handlers=handlers)
+            self._run('check', options, handlerclass=handlerclass)
 
     def create(self, repo, includes, excludes=[],
                prefix='{hostname}', stats=False,
-               handlers=None):
+               handlerclass=None):
         if not includes:
             raise ValueError('No paths given to include in the archive!')
 
@@ -407,10 +412,10 @@ class Borg():
         options.extend(includes)
 
         with repo:
-            self._run('create', options, handlers=handlers)
+            self._run('create', options, handlerclass=handlerclass)
 
     def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False,
-              handlers=None):
+              handlerclass=None):
         raise NotImplementedError()
         options = repo.borg_args()
         if foreground:
@@ -423,7 +428,7 @@ class Borg():
         options.append(target)
 
         with repo:
-            self._run('mount', options, handlers=handlers)
+            self._run('mount', options, handlerclass=handlerclass)
 
     def umount(self, repo, handlers=None):
         raise NotImplementedError()
@@ -435,7 +440,7 @@ class Borg():
              prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
              sort_by='', additional_keys=[], pandas=True, short=False,
-             handlers=None):
+             handlerclass=None):
         # NOTE: This can list either repo contents (archives) or archive
         # contents (files). Respect that, maybe even split in separate methods
         # (since e.g. repos should have the 'short' option to only return the
@@ -477,7 +482,7 @@ class Borg():
 
         output = []
         with repo:
-            self._run('list', options, output=output, handlers=handlers)
+            self._run('list', options, output=output, handlerclass=handlerclass)
 
         output = (json.loads(line) for line in output)
         if pandas:
@@ -496,11 +501,14 @@ class Borg():
         raise NotImplementedError()
 
     def prune(self, repo, keep, prefix=None, verbose=True,
-              handlers=None):
+              handlerclass=None):
         if not keep:
             raise ValueError('No archives to keep given for pruning!')
         options = repo.borg_args()
 
+        # TODO: Is the verbose option necessary here, or should --list --stats
+        # always be passed and filtering of the output occur but in the
+        # handlers class?
         if verbose:
             options.extend(['--list', '--stats'])
         for interval, number in keep.items():
@@ -510,7 +518,7 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            self._run('prune', options, handlers=handlers)
+            self._run('prune', options, handlerclass=handlerclass)
 
     def recreate(self, handlers=None):
         raise NotImplementedError()

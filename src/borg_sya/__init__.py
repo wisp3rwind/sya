@@ -394,7 +394,7 @@ class Context():
         self.tasks = tasks or dict()
 
     def attach_borg(self):
-        self.borg = Borg(self.dryrun, self.verbose)
+        self.borg = Borg(self.dryrun)
 
     @classmethod
     def from_configuration(cls, confdir, conffile):

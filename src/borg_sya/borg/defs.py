@@ -1,3 +1,6 @@
+import logging
+
+
 _MESSAGE_TYPES = [
     'archive_progress',
     'file_status',
@@ -150,3 +153,12 @@ RepositoryInsufficientFreeSpaceError       = make_borg_error('RepositoryInsuffic
 RepositoryInvalidRepository                = make_borg_error('RepositoryInvalidRepository',                'Repository.InvalidRepository')
 RepositoryAtticRepository                  = make_borg_error('RepositoryAtticRepository',                  'Repository.AtticRepository')
 RepositoryObjectNotFound                   = make_borg_error('RepositoryObjectNotFound',                   'Repository.ObjectNotFound')
+
+
+_VERBOSITY_OPTIONS = {
+    logging.CRITICAL: '--critical',
+    logging.ERROR: '--error',
+    logging.WARNING: '',
+    logging.INFO: '--verbose',
+    logging.DEBUG: '--debug',
+}
