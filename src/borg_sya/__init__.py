@@ -115,7 +115,7 @@ def if_enabled(f):
         if self.enabled:
             return(f(self, *args, **kwargs))
         elif not hasattr(self, 'disabled_msg_shown'):
-            self.cx.debug(f"! Task disabled. Set 'run_this' to 'yes' "
+            self.cx.debug(f"! Task disabled. Set 'run-this' to 'yes' "
                           f"in config section {self.name} to change this.")
             self.disabled_msg_shown = True
             return
@@ -242,8 +242,8 @@ class Task():
             includes = cfg.get('includes', [])
             if not includes and not include_file:
                 raise InvalidConfigurationError(
-                        f"Either 'includes' or 'include-fle' is mandatory in "
-                        f"configuration file {name}"
+                        f"Either 'includes' or 'include-file' is mandatory in "
+                        f"configuration for task {name}"
                         )
             # Do not load include and exclude files yet since this task might
             # not even be run.
@@ -262,7 +262,7 @@ class Task():
                 includes=includes,
                 include_file=include_file,
                 exclude_file=exclude_file,
-                path_prefix=cfg.get('path-prefix', '')
+                path_prefix=cfg.get('path-prefix', ''),
                 # PrePostScript args
                 pre=cfg.get('pre', None),
                 pre_desc=f"'{name}' pre-backup script",
@@ -328,6 +328,9 @@ class Task():
             with open(self.exclude_file) as f:
                 excludes.extend(f.readlines())
 
+        includes = [i.rstrip('\r\n') for i in includes]
+        excludes = [e.rstrip('\r\n') for e in excludes]
+
         assert(all(os.path.isabs(i) for i in includes))
         assert(all(os.path.isabs(e) for e in excludes))
 
@@ -390,7 +393,7 @@ class Context():
         self.repos = repos or dict()
         self.tasks = tasks or dict()
 
-    def attach_borg():
+    def attach_borg(self):
         self.borg = Borg(self.dryrun, self.verbose)
 
     @classmethod
@@ -420,6 +423,7 @@ class Context():
                  verbose=verbose, log=log,
                  repos=None, tasks=None,
                  )
+        cx.attach_borg()
         cx.repos = {repo: Repository.from_yaml(repo, rcfg, cx)
                     for repo, rcfg in cfg['repositories'].items()
                     }
@@ -439,6 +443,7 @@ class Context():
 
     @verbose.setter
     def verbose(self, value):
+        self._verbose = value
         if self.log:
             if value:
                 self.log.setLevel(logging.DEBUG)
@@ -471,6 +476,10 @@ class Context():
         if self.log:
             self.log.info(msg)
             print(msg)
+
+    def debug(self, msg):
+        if self.log:
+            self.log.debug(msg)
 
     def info(self, msg):
         if self.log:

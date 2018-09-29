@@ -303,7 +303,7 @@ class Borg():
             if output and stdout is not None:
                 outbuf.append(stdout)
             elif msg:
-                handlers._dispatch(self, stderr)
+                handlers._dispatch(self, msg)
 
         self._running = False
 

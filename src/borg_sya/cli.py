@@ -40,7 +40,6 @@ def main(ctx, confdir, dryrun, verbose):
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
     cx.dryrun = dryrun
-    cx.attach_borg()
     ctx.obj = cx
 
 
