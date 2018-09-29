@@ -188,7 +188,7 @@ POISON = object()
 
 class Borg():
 
-    _HANDLERS = DefaultHandlers()
+    _HANDLERCLASS = DefaultHandlers
 
     def __init__(self, dryrun, verbose, log=None):
         self.dryrun = dryrun
@@ -293,7 +293,7 @@ class Borg():
         of common arguments given as parameters to this function). Messages
         from borg are read as JSON and dispatched to the `handlers`.
         """
-        handlers = handlers or self._HANDLERS
+        handlers = (handlerclass or self._HANDLERCLASS)()
 
         commandline = [BINARY, command]
         commandline.append('--log-json')
