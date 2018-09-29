@@ -14,6 +14,9 @@ from .defs import (
     _PROMPT_MESSAGE_IDS,
     _OPERATION_MESSAGE_IDS,
 )
+from .helpers import (
+    format_file_size,
+)
 
 from ..util import which
 
@@ -115,7 +118,7 @@ class DefaultHandlers():
         elif msg['type'] == 'progress_percent':
             f = self.onProgressPercent
         elif msg['type'] == 'archive_progress':
-            f = self._onUnhandled
+            f = self.onArchiveProgress
         elif msg['type'] == 'file_status':
             f = self._onUnhandled
         elif msg['type'] == 'question_prompt':
@@ -157,6 +160,21 @@ class DefaultHandlers():
 
     def onProgressPercent(self, borg, **msg):
         pass
+
+    def onArchiveProgress(self, borg,
+                          original_size, compressed_size,  deduplicated_size,
+                          nfiles, time, path,
+                          **msg):
+        # Mimic borg's progress output
+        msg = ('{osize} O {csize} C {dsize} D {nfiles} N ').format(
+                osize=format_file_size(original_size),
+                csize=format_file_size(compressed_size),
+                dsize=format_file_size(deduplicated_size),
+                nfiles=nfiles,
+                )
+        msg += path
+        borg._log.info(msg)
+        # borg._log.update_spinner('archive_progress', msg)
 
     def onPrompt(self, borg, **msg):
         raise RuntimeError()
