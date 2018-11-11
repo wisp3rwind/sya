@@ -43,6 +43,22 @@ class Spinner():
                              )
 
 
+class DummySpinner(Spinner):
+    """ Doesn't actually spin, but can be used as a drop-in when headed into a
+    pipe.
+    """
+    def __init__(self, *args, silent=False, **kwargs):
+        self.silent = silent
+        super().__init__(*args, **kwargs)
+
+    def draw(self):
+        if not self.silent:
+            self._cli._print(self._current_symbol + ' ' + self.msg,
+                             term=self._cli.stderr,
+                             flush=True,
+                             )
+
+
 class Terminal():
     def __init__(self):
         self.stdout = blessings.Terminal(stream=sys.stdout)
@@ -99,39 +115,51 @@ class Terminal():
             self._print(msg, end=end, term=self.stderr, flush=True)
 
     @contextmanager
-    def spinner(self, msg, symbols=None):
+    def spinner(self, msg, symbols=None, silent_for_pipes=False):
         term = self.stderr
+
         with self._locks[term]:
-            s = Spinner(self, len(self._spinners), msg, symbols)
-            # add one line
-            self._print('', term=term, flush=True)
-            self._spinners.append(s)
+            if term.does_styling:
+                s = Spinner(self, len(self._spinners), msg, symbols)
+                # add one line
+                self._print('', term=term, flush=True)
+                self._spinners.append(s)
+            else:
+                s = DummySpinner(self, len(self._spinners), msg, symbols,
+                                 silent=silent_for_pipes
+                                 )
 
         yield s
 
-        with self._locks[term]:
-            idx = self._spinners.index(s)
-            for spinner in self._spinners[idx + 1:]:
-                # These are now closer to the bottom line
-                spinner.pos -= 1
-            self._spinners.remove(s)
+        if term.does_styling:
+            with self._locks[term]:
+                idx = self._spinners.index(s)
+                for spinner in self._spinners[idx + 1:]:
+                    # These are now closer to the bottom line
+                    spinner.pos -= 1
+                self._spinners.remove(s)
 
-            # remove one line
-            self._print(term.move_up + term.clear_eol + term.clear_bol,
-                        term=term,
-                        end='',
-                        flush=True,
-            )
+                # remove one line
+                self._print(term.move_up + term.clear_eol + term.clear_bol,
+                            term=term,
+                            end='',
+                            flush=True,
+                )
 
-            # redraw all below below the removed one such that they actually move
-            # up
-            # FIXME: this is racy
-            for spinner in self._spinners[:idx]:
-                spinner.draw()
+                # redraw all below below the removed one such that they actually move
+                # up
+                # FIXME: this is racy
+                for spinner in self._spinners[:idx]:
+                    spinner.draw()
 
 
 if __name__ == '__main__':
     """ Basic test.
+
+    Run as
+    >>> python terminal.py
+    and
+    >>> python terminal.py 2>&1 | tee
     """
     import time
     T = 0.5
@@ -139,7 +167,7 @@ if __name__ == '__main__':
     time.sleep(T)
     with t.spinner("foo") as s:
       time.sleep(T)
-      with t.spinner("bar") as s2:
+      with t.spinner("bar", silent_for_pipes=True) as s2:
         for i in range(3):
           time.sleep(T)
           s("foo" + str(i))
