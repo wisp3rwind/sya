@@ -26,6 +26,7 @@ class Spinner():
         """
         with self._cli._locks[self._cli.stderr]:
             self._advance(msg)
+            self._cli._redraw_spinners()
 
     def update(self, msg):
         self(msg)
@@ -33,15 +34,9 @@ class Spinner():
     def _advance(self, msg):
         self.msg = msg
         self._current_symbol = next(self._symbols)
-        self.draw()
 
-    def draw(self):
-        with self._cli.replace_line_err(self.pos):
-            self._cli._print(self._current_symbol + ' ' + self.msg,
-                             term=self._cli.stderr,
-                             end='',
-                             flush=True,  # Otherwise might not happen due to lack of EOL
-                             )
+    def render(self, width):
+        return self._current_symbol + ' ' + self.msg
 
 
 class DummySpinner(Spinner):
@@ -52,12 +47,11 @@ class DummySpinner(Spinner):
         self.silent = silent
         super().__init__(*args, **kwargs)
 
-    def draw(self):
+    def render(self, width):
         if not self.silent:
-            self._cli._print(self._current_symbol + ' ' + self.msg,
-                             term=self._cli.stderr,
-                             flush=True,
-                             )
+            return super().render(width)
+        else:
+            return ''
 
 
 class Terminal():
@@ -88,10 +82,9 @@ class Terminal():
 
     @contextmanager
     def replace_line(self, pos, term=None):
-        pos = len(self._spinners) - pos
         term = term or self.stdout
         with term.location():
-            print(term.move_up * pos + term.clear_eol + term.clear_bol,
+            print(term.move_down * pos + term.clear_eol + term.clear_bol,
                   file=term.stream,
                   end='',
             )
@@ -128,15 +121,15 @@ class Terminal():
         term = self.stderr
         with self._locks[term]:
             self._print(
-                term.move_up * len(self._spinners)
-                + msg
-                + term.move_down * len(self._spinners),  # new lines
-                end=end,
+                term.move_x(0) + term.clear_eol + msg,
                 term=term,
             )
-            for spinner in self._spinners:
-                spinner.draw()
-            self._flush(term)
+            self._print(
+                ('\n' + term.move_up) * msg.count('\n'),
+                term=term,
+                end='',
+            )
+            self._redraw_spinners()
     
     def _flush(self, term):
         term.stream.flush()
@@ -154,6 +147,25 @@ class Terminal():
         if text:
             self.print(text)
 
+    def _redraw_spinners(self):
+        """
+        
+        Lock must be held.
+        """
+        term = self.stderr
+        with term.location():
+            last = self._spinners[-1] if self._spinners else None
+            for spinner in self._spinners:
+                self._print(
+                    term.move_x(0) + term.clear_eol + spinner.render(term.width),
+                    term=term,
+                    end='',
+                )
+                if spinner is not last:
+                    self._print(term.move_down, term=term, end='')
+            self._print(term.clear_eos, end='', term=term)
+        self._print(term.move_x(0), term=term, end='', flush=True)  # flush
+
     @contextmanager
     def spinner(self, msg, symbols=None, silent_for_pipes=False):
         term = self.stderr
@@ -161,36 +173,22 @@ class Terminal():
         with self._locks[term]:
             if term.does_styling:
                 s = Spinner(self, len(self._spinners), symbols)
-                # add one line
-                self._print('', term=term, flush=True)
-                self._spinners.append(s)
                 s._advance(msg)
+                self._spinners.append(s)
+                self._print('\n' + term.move_up, term=term, end='', flush=True)
+                self._redraw_spinners()
             else:
                 s = DummySpinner(self, len(self._spinners), msg, symbols,
                                  silent=silent_for_pipes
                                  )
+                self.print(s.render())
 
         yield s
 
         if term.does_styling:
             with self._locks[term]:
-                idx = self._spinners.index(s)
-                for spinner in self._spinners[idx + 1:]:
-                    # These are now closer to the bottom line
-                    spinner.pos -= 1
                 self._spinners.remove(s)
-
-                # remove one line
-                self._print(term.move_up + term.clear_eol + term.clear_bol,
-                            term=term,
-                            end='',
-                            flush=True,
-                )
-
-                # redraw all below below the removed one such that they
-                # actually move up
-                for spinner in self._spinners[:idx]:
-                    spinner.draw()
+                self._redraw_spinners()
 
 
 if __name__ == '__main__':
