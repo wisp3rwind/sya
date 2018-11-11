@@ -16,6 +16,7 @@ setup(name='borg_sya',
           'click',
           'pyyaml',
           'blessings',
+          'wcwidth',
       ],
 
       packages=find_packages('src'),

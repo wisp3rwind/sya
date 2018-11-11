@@ -42,6 +42,7 @@ from . import util
 from .util import (ProcessLock, LazyReentrantContextmanager)
 from . import borg
 from .borg import (Borg, BorgError)
+from . import terminal
 
 
 __all__ = ['InvalidConfigurationError',
@@ -200,7 +201,9 @@ class Repository(borg.Repository):
 
     def check(self):
         with self:
-            self.cx.borg.check(self)
+            self.cx.borg.check(self,
+                               handlers=self.cx.handler_factory()
+                               )
 
 
 class Task():
@@ -345,6 +348,7 @@ class Task():
                 includes, excludes,
                 prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
                 stats=True,
+                handlers=self.cx.handler_factory()
             )
 
     @if_enabled
@@ -354,6 +358,7 @@ class Task():
                 self.cx.borg.prune(self.repo,
                                    self.keep,
                                    prefix=f'{self.prefix}-',
+                                   handlers=self.cx.handler_factory()
                                    )
         except BorgError as e:
             self.cx.error(e)
@@ -385,22 +390,28 @@ class SyaSafeLoader(SafeLoader):
 
 
 class Context():
-    def __init__(self, confdir, dryrun, verbose, log, repos, tasks):
+    def __init__(self, confdir, dryrun, verbose, term, log, repos, tasks):
         self.confdir = confdir
         self.dryrun = dryrun
+        self.term = term
         self.log = log
         self.verbose = verbose
         self.repos = repos or dict()
         self.tasks = tasks or dict()
+        self.handler_factory = None
 
     def attach_borg(self):
         self.borg = Borg(self.dryrun)
 
     @classmethod
     def from_configuration(cls, confdir, conffile):
+        term = terminal.Terminal()
+        handler = logging.StreamHandler(term)
+        handler.terminator = ''
         logging.basicConfig(
             format='{name}: {message}', style='{',
             level=logging.WARNING,
+            handlers=[handler],
         )
         log = logging.getLogger()
 
@@ -420,7 +431,7 @@ class Context():
 
         # Parse configuration into corresponding classes.
         cx = cls(confdir=confdir, dryrun=False,
-                 verbose=verbose, log=log,
+                 verbose=verbose, term=term, log=log,
                  repos=None, tasks=None,
                  )
         cx.attach_borg()
@@ -472,10 +483,18 @@ class Context():
     def lock(self, *args):
         return ProcessLock('sya' + self.confdir + '-'.join(*args))
 
-    def print(self, msg):
-        if self.log:
-            self.log.info(msg)
-            print(msg)
+    @property
+    def handler_factory(self):
+        return self._handler_factory
+
+    @handler_factory.setter
+    def handler_factory(self, func):
+        self._handler_factory = func or (lambda: None)
+
+    # def print(self, msg):
+    #     if self.log:
+    #         self.log.info(msg)
+    #         print(msg)
 
     def debug(self, msg):
         if self.log:

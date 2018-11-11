@@ -6,6 +6,7 @@ import subprocess
 import sys
 from subprocess import Popen
 from threading import Thread
+from wcwidth import wcswidth
 from yaml import YAMLObject
 from yaml.loader import SafeLoader
 
@@ -102,6 +103,21 @@ class LazyReentrantContextmanager():
 def indent(text, by=4):
     by = by * ' '
     return by + text.replace('\n', '\n' + by)
+
+
+def truncate_path(path, width):
+    if wcswidth(path) <= width:
+        # This includes the case wcswidth(path) == -1, i.e. non-printable (borg/issues/1090)
+        return path
+
+    i = len(path) // 2
+    d = 1
+    while True:
+        trunc = path[:i-d] + '…' + path[i+d:]
+        if wcswidth(trunc) <= width:
+            return trunc
+        d += 1
+
 
 
 class Script(YAMLObject):

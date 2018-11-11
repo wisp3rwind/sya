@@ -7,13 +7,57 @@ import time
 import traceback
 
 from . import InvalidConfigurationError, Context
-from .borg import BorgError
+from .borg import BorgError, DefaultHandlers
 from .gui import main as gui_main
-from .util import LockInUse
+from .util import LockInUse, truncate_path
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
 DEFAULT_CONFFILE = 'config.yaml'
 APP_NAME = 'borg-sya'
+
+
+class BorgHandlers(DefaultHandlers):
+    def __init__(self, log, cli):
+        self.cli = cli
+        self._spinners = dict()
+        super().__init__(log)
+
+    def __del__(self):
+        for contextmanager, _ in self._spinners.values():
+            contextmanager.__exit__(None, None, None)
+        self._spinners = dict()
+
+    def _get_spinner(self, name):
+        try:
+            _, spinner = self._spinners[name]
+        except KeyError:
+            contextmanager = self.cli.spinner('')
+            spinner = contextmanager.__enter__()
+            self._spinners[name] = (contextmanager, spinner)
+        return spinner
+
+    def _close_spinner(self, name):
+        try:
+            (contextmanager, _) = self._spinners.pop(name)
+            contextmanager.__exit__(None, None, None)
+        except KeyError:
+            pass
+
+    def onArchiveProgress(self, path, **msg):
+        spinner = self._get_spinner('onArchiveProgress')
+        text = self.format_archive_progress(**msg)
+        # FIXME: instead of ' - 15', determine the actual indentation caused by
+        # the logger
+        term_width = self.cli.stderr.width - 15
+        if len(text) <= term_width:
+            space = term_width - len(text)
+            if space >= 12:
+                text += truncate_path(path, space)
+        else:
+            text = truncate_path(path, term_width)
+
+
+        spinner.update(text)
 
 
 @click.group()
@@ -35,11 +79,12 @@ def main(ctx, confdir, dryrun, verbose):
               file=sys.stderr)
         raise click.Abort()
     except InvalidConfigurationError as e:
-        print(e)
+        print(e, file=sys.stderr)
         raise click.Abort()
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
     cx.dryrun = dryrun
+    cx.handler_factory = lambda: BorgHandlers(cx.log, cx.term)
     ctx.obj = cx
 
 

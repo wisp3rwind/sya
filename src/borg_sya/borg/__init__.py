@@ -102,7 +102,11 @@ class DefaultHandlers():
     handles_progress = True
     wants_loglevel = logging.INFO
 
-    def _dispatch(self, borg, msg):
+    def __init__(self, log):
+        self.log = log
+        self._spinners = dict()
+
+    def _dispatch(self, msg):
         if msg.get('type') == 'log_message':
             name = msg.get('name')
             if msg.get('msgid') in _ERROR_MESSAGE_IDS:
@@ -141,50 +145,51 @@ class DefaultHandlers():
         elif msg['type'] == 'question_env_answer':
             f = self._onUnhandled
 
-        f(borg, **msg)
+        f(**msg)
 
-    def _onUnhandled(self, borg, **msg):
+    def _onUnhandled(self, **msg):
         # TODO: maybe debug-log unhandled messages?
         pass
 
-    def onError(self, borg, **msg):
+    def onError(self, **msg):
         # Does this always mean that there was a fatal error, or would it be
         # sensible to communicate this to the outside in a reentrant way?
         raise BorgError(**msg)
 
-    def onBorgOutput(self, borg, **msg):
+    def onBorgOutput(self, **msg):
         """Receives the messages that borg would write to sterr on a standard
         (non-JSON) CLI session
         """
         # TODO: should these messages be passed on?
         if msg.get('name') not in ['borg.output.progress']:
-            borg._log.info(f"[BORG] {msg.get('message', '')}".rstrip('\n'))
+            self.log.info(f"[BORG] {msg.get('message', '')}".rstrip('\n'))
 
-    def onProgressMessage(self, borg, **msg):
+    def onProgressMessage(self, **msg):
         pass
 
-    def onProgressPercent(self, borg, **msg):
+    def onProgressPercent(self, **msg):
         pass
 
-    def onArchiveProgress(self, borg,
-                          original_size, compressed_size,  deduplicated_size,
-                          nfiles, time, path,
-                          **msg):
+    def format_archive_progress(self,
+                                original_size, compressed_size,
+                                deduplicated_size, nfiles, time,
+                                **msg):
         # Mimic borg's progress output
-        msg = ('{osize} O {csize} C {dsize} D {nfiles} N ').format(
-                osize=format_file_size(original_size),
-                csize=format_file_size(compressed_size),
-                dsize=format_file_size(deduplicated_size),
-                nfiles=nfiles,
-                )
-        msg += path
-        borg._log.info(msg)
-        # borg._log.update_spinner('archive_progress', msg)
+        return '{osize} O {csize} C {dsize} D {nfiles} N '.format(
+                    osize=format_file_size(original_size),
+                    csize=format_file_size(compressed_size),
+                    dsize=format_file_size(deduplicated_size),
+                    nfiles=nfiles,
+        )
 
-    def onPrompt(self, borg, **msg):
+    def onArchiveProgress(self, path, **msg):
+        # TODO: truncate path
+        self.log.info(self.format_archive_progress(**msg) + path)
+
+    def onPrompt(self, **msg):
         raise RuntimeError()
 
-    def onOtherMessage(self, borg, **msg):
+    def onOtherMessage(self, **msg):
         pass
 
 
@@ -292,12 +297,12 @@ class Borg():
     # TODO check `man borg-common` for more arguments to support
     @_while_running(False)
     def _run(self, command, options, env=None, output=False,
-             handlerclass=None):
+             handlers=None):
         """Run a borg commandline (possibly after extending it with a number
         of common arguments given as parameters to this function). Messages
         from borg are read as JSON and dispatched to the `handlers`.
         """
-        handlers = (handlerclass or self._HANDLERCLASS)()
+        handlers = (handlers or self._HANDLERCLASS(self._log))
 
         commandline = [BINARY, command]
         commandline.append('--log-json')
@@ -326,7 +331,7 @@ class Borg():
             if output and stdout is not None:
                 outbuf.append(stdout)
             elif msg:
-                handlers._dispatch(self, msg)
+                handlers._dispatch(msg)
 
         self._running = False
 
@@ -371,7 +376,7 @@ class Borg():
               repos_only=False, archives_only=False,
               verify_data=False, repair=False, save_space=False,
               prefix=None, glob=None, sort_by=None, first=0, last=0,
-              handlerclass=None,
+              handlers=None,
               ):
         if repos_only and verify_data:
             raise ValueError('borg-check options --repository-only and '
@@ -394,11 +399,11 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            self._run('check', options, handlerclass=handlerclass)
+            self._run('check', options, handlers=handlers)
 
     def create(self, repo, includes, excludes=[],
                prefix='{hostname}', stats=False,
-               handlerclass=None):
+               handlers=None):
         if not includes:
             raise ValueError('No paths given to include in the archive!')
 
@@ -412,10 +417,10 @@ class Borg():
         options.extend(includes)
 
         with repo:
-            self._run('create', options, handlerclass=handlerclass)
+            self._run('create', options, handlers=handlers)
 
     def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False,
-              handlerclass=None):
+              handlers=None):
         raise NotImplementedError()
         options = repo.borg_args()
         if foreground:
@@ -428,7 +433,7 @@ class Borg():
         options.append(target)
 
         with repo:
-            self._run('mount', options, handlerclass=handlerclass)
+            self._run('mount', options, handlers=handlers)
 
     def umount(self, repo, handlers=None):
         raise NotImplementedError()
@@ -440,7 +445,7 @@ class Borg():
              prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
              sort_by='', additional_keys=[], pandas=True, short=False,
-             handlerclass=None):
+             handlers=None):
         # NOTE: This can list either repo contents (archives) or archive
         # contents (files). Respect that, maybe even split in separate methods
         # (since e.g. repos should have the 'short' option to only return the
@@ -482,7 +487,7 @@ class Borg():
 
         output = []
         with repo:
-            self._run('list', options, output=output, handlerclass=handlerclass)
+            self._run('list', options, output=output, handlers=handlers)
 
         output = (json.loads(line) for line in output)
         if pandas:
@@ -501,7 +506,7 @@ class Borg():
         raise NotImplementedError()
 
     def prune(self, repo, keep, prefix=None, verbose=True,
-              handlerclass=None):
+              handlers=None):
         if not keep:
             raise ValueError('No archives to keep given for pruning!')
         options = repo.borg_args()
@@ -518,7 +523,7 @@ class Borg():
         options.append(f"{repo}")
 
         with repo:
-            self._run('prune', options, handlerclass=handlerclass)
+            self._run('prune', options, handlers=handlers)
 
     def recreate(self, handlers=None):
         raise NotImplementedError()

@@ -8,7 +8,7 @@ import threading
 class Spinner():
     SYMBOLS = ['[' + s + ']' for s in '|/-\\']  # python's r'' strings are weird...
 
-    def __init__(self, cli, pos, msg, symbols=None):
+    def __init__(self, cli, pos, symbols=None):
         """
 
         The caller must hold a lock for the stderr sream.
@@ -18,8 +18,6 @@ class Spinner():
         self.pos = pos
         self._cli = cli
 
-        self._advance(msg)
-
     def __call__(self, msg):
         """
         >>> with cli.spinner("Starting...") as status:
@@ -28,6 +26,9 @@ class Spinner():
         """
         with self._cli._locks[self._cli.stderr]:
             self._advance(msg)
+
+    def update(self, msg):
+        self(msg)
 
     def _advance(self, msg):
         self.msg = msg
@@ -104,15 +105,54 @@ class Terminal():
     def _print(self, msg, end='\n', term=None, flush=False):
         print(msg, file=term.stream, end=end, flush=flush)
 
-    def print(self, msg, end='\n'):
-        # TODO: only ever print full lines
-        with self._locks[self.stdout]:
-            self._print(msg, end=end, term=self.stdout, flush=True)
+    def output(self, msg, end='\n'):
+        """ Print to stdout, i.e. actual output
+        """
+        term = self.stdout
+        with self._locks[term]:
+            self._print(
+                msg,
+                end=end,
+                term=term,
+                flush=True,
+            )
 
-    def print_err(self, msg, end='\n'):
-        # TODO: only ever print full lines
-        with self._locks[self.stderr]:
-            self._print(msg, end=end, term=self.stderr, flush=True)
+    def print(self, msg, end='\n'):
+        """ Print to stderr (above all of the spinners), i.e. logs etc. 
+        """
+        if end != '\n':
+            # Disallow because this would be hard to handle when spinners are
+            # active.
+            raise ValueError()
+
+        term = self.stderr
+        with self._locks[term]:
+            self._print(
+                term.move_up * len(self._spinners)
+                + msg
+                + term.move_down * len(self._spinners),  # new lines
+                end=end,
+                term=term,
+            )
+            for spinner in self._spinners:
+                spinner.draw()
+            self._flush(term)
+    
+    def _flush(self, term):
+        term.stream.flush()
+
+    def flush(self):
+        """ Intended to be called by a logging.StreamHandler.
+        """
+        self._flush(self.stderr)
+
+    def write(self, text):
+        """ Intended to be called by a logging.StreamHandler.
+        """
+        # hack, since StreamHandler will always print the terminator using a
+        # separate call to write()
+        if text:
+            self.print(text)
 
     @contextmanager
     def spinner(self, msg, symbols=None, silent_for_pipes=False):
@@ -120,10 +160,11 @@ class Terminal():
 
         with self._locks[term]:
             if term.does_styling:
-                s = Spinner(self, len(self._spinners), msg, symbols)
+                s = Spinner(self, len(self._spinners), symbols)
                 # add one line
                 self._print('', term=term, flush=True)
                 self._spinners.append(s)
+                s._advance(msg)
             else:
                 s = DummySpinner(self, len(self._spinners), msg, symbols,
                                  silent=silent_for_pipes
@@ -146,9 +187,8 @@ class Terminal():
                             flush=True,
                 )
 
-                # redraw all below below the removed one such that they actually move
-                # up
-                # FIXME: this is racy
+                # redraw all below below the removed one such that they
+                # actually move up
                 for spinner in self._spinners[:idx]:
                     spinner.draw()
 
@@ -166,10 +206,14 @@ if __name__ == '__main__':
     t = Terminal()
     time.sleep(T)
     with t.spinner("foo") as s:
-      time.sleep(T)
-      with t.spinner("bar", silent_for_pipes=True) as s2:
-        for i in range(3):
-          time.sleep(T)
-          s("foo" + str(i))
-          time.sleep(T)
-          s2("bar" + str(i))
+        time.sleep(T)
+        with t.spinner("bar", silent_for_pipes=True) as s2:
+            for i in range(4):
+                if i == 3:
+                    t.print("something\nthat spans two lines")
+                time.sleep(T)
+                s("foo" + str(i))
+                time.sleep(T)
+                s2("bar" + str(i))
+            time.sleep(T)
+        time.sleep(T)
