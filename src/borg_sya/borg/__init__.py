@@ -19,7 +19,7 @@ from .helpers import (
     format_file_size,
 )
 
-from ..util import which
+from ..util import which, format_commandline
 
 # TODO:
 # - logging (component-wise, hierarchical)
@@ -319,7 +319,7 @@ class Borg():
 
         commandline.extend(options)
 
-        self._log.debug(commandline)
+        self._log.debug(format_commandline(commandline))
         self._p = p = Popen(commandline, env=env,
                             stdout=PIPE, stderr=PIPE,
                             )

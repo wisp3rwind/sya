@@ -27,6 +27,10 @@ def isexec(path):
         return os.access(path, os.X_OK)
 
 
+def format_commandline(args):
+    return ' '.join(['\n    ' + a if a.startswith('-') else a for a in args])
+
+
 class LockInUse(Exception):
     pass
 
