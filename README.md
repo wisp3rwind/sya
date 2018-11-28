@@ -2,7 +2,7 @@
 
 [`Sya`][2] is a very basic frontend to [`borg`][1]. Its goal is to
 provide easy management of multiple independent backup tasks with an intuitive
-commandline interface. A graphical interface is planned.
+commandline interface.
 
 ## Under the hood & historical remarks
 Basically, it constructs `borg` command lines from repository and task
@@ -12,12 +12,16 @@ specifications given in a configuration file. Then, the JSON interface to
 While this started as a fork of @niol's tool, there's essentially no
 compatibility to his original version and almost all of the code has seen
 significant changes:
-- [x] **this README is hopelessly out of date**
-- [x] the configuration file is YAML instead of INI
-- [x] the CLI is entirely different (subcommands, etc.)
-- [x] it is very much WIP, breaking changes are expected
+- **this README is hopelessly out of date**
+- the configuration file is YAML instead of INI
+- the CLI is entirely different (subcommands, etc.)
+- it is very much WIP, breaking changes are expected
+
+Some features that I would like to implement in the future include
 - [ ] GUI (in addition to the commandline)
 - [ ] Desktop notifications
+- [ ] tray icon with status similar to time machine
+- [ ] better integration with btrfs snapshots
 
  [1]: https://borgbackup.readthedocs.io/
  [2]: https://github.com/niol/sya
@@ -113,7 +117,7 @@ Example exclude file `/etc/sya/local.exclude` :
 ## Installation (short)
 
 `sya` is a python package, as such the easiest way to install it is through
-`pip`. The package also includes an xample configuration file.
+`pip`. The package also includes an example configuration file.
 There's an Arch PKGBUILD on the [AUR](???).
 
 I automate backups through `systemd` timers and services, corresponding example
