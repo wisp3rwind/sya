@@ -7,7 +7,7 @@ import time
 import traceback
 
 from . import InvalidConfigurationError, Context
-from .borg import BorgError, DefaultHandlers
+from .borg import BorgError, DefaultHandlers, InvalidBorgOptions
 from .gui import main as gui_main
 from .util import LockInUse, truncate_path
 
@@ -104,6 +104,8 @@ def gui(cx):
 def handle_errors(cx, repo, action, action_failed):
     try:
         yield
+    except InvalidBorgOptions as e:
+        cx.error(f"Invalid commandline options: {e}")
     except BorgError as e:
         cx.error(f"Error {e} when {action_failed}.\nYou should investigate.")
     except LockInUse as e:

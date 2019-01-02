@@ -34,6 +34,10 @@ except RuntimeError as e:
     sys.exit(str(e))
 
 
+class InvalidBorgOptions(Exception):
+    pass
+
+
 class Repository():
     def __init__(self, name, path, borg,
                  compression=None, remote_path=None, passphrase=None,
@@ -375,8 +379,9 @@ class Borg():
             **kwargs
             ):
         if prefix and glob:
-            raise ValueError("Cannot combine archive matching by prefix and "
-                             "glob pattern!")
+            raise InvalidBorgOptions(
+                    "options --glob-archives and --prefix conflict"
+                    )
         if prefix: options.extend(['--prefix', prefix])
         if glob_archives: options.extend(['--glob-archives', glob_archives])
         if sorting:
@@ -398,9 +403,9 @@ class Borg():
 
     def _handle_unknown_arguments(self, remaining):
         if remaining:
-            raise TypeError("Unknown keyword arguments {}",
+            raise InvalidBorgOptions("unknown borg arguments {}".format(
                             ', '.join(remaining.keys())
-                            )
+                            ))
 
     # borg-check also takes an archive instead of a full repo as argument, this
     # is not supported here fore now.
@@ -410,8 +415,8 @@ class Borg():
               handlers=None, **kwargs,
               ):
         if repos_only and verify_data:
-            raise ValueError('borg-check options --repository-only and '
-                             '--verify-data conflict!')
+            raise InvalidBorgOptions('borg-check options --repository-only and '
+                                     '--verify-data conflict')
 
         options = repo.borg_args()
         if repos_only: options.append('--repository-only')
@@ -430,7 +435,9 @@ class Borg():
                prefix='{hostname}', stats=False,
                handlers=None):
         if not includes:
-            raise ValueError('No paths given to include in the archive!')
+            raise InvalidBorgOptions(
+                'No paths given to include in the archive',
+            )
 
         options = repo.borg_args(create=True)
         if stats:
@@ -526,7 +533,7 @@ class Borg():
         # whole class: on two levels, not running borg at all, and running
         # borg --dry-run
         if not keep:
-            raise ValueError('No archives to keep given for pruning!')
+            raise InvalidBorgOptions('No archives to keep given for pruning')
         options = repo.borg_args()
 
         # TODO: Is the verbose option necessary here, or should --list --stats
@@ -537,7 +544,7 @@ class Borg():
         for interval, number in keep.items():
             if not interval in ['last', 'secondly', 'minutely', 'hourly',
                                 'daily', 'weekly', 'monthly', 'yearly']:
-                raise ValueError("Invalid interval '{}' specified for
+                raise InvalidBorgOptions("Invalid interval '{}' specified for
                                  pruning".format(interval))
             options.extend([f'--keep-{interval}', str(number)])
         if save_space: options.append('--save-space')
