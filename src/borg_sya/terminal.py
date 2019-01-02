@@ -5,6 +5,13 @@ import sys
 import threading
 
 
+""" Other libraries providing spinners:
+- https://github.com/manrajgrover/halo
+- https://github.com/manrajgrover/py-spinners
+- https://github.com/manrajgrover/py-log-symbols
+"""
+
+
 class Spinner():
     SYMBOLS = ['[' + s + ']' for s in '|/-\\']  # python's r'' strings are weird...
 
