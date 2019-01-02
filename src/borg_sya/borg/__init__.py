@@ -370,13 +370,44 @@ class Borg():
     def init(self):
         raise NotImplementedError()
 
+    def _handle_archive_filter_options(self, sorting=False, options,
+            prefix=None, glob_archives=None, sort_by=None, first=0, last=0,
+            **kwargs
+            ):
+        if prefix and glob:
+            raise ValueError("Cannot combine archive matching by prefix and "
+                             "glob pattern!")
+        if prefix: options.extend(['--prefix', prefix])
+        if glob_archives: options.extend(['--glob-archives', glob_archives])
+        if sorting:
+            # Some commands support the previous filters, but not these
+            if sort_by:
+                if all(s in ['timestamp', 'name', 'id']
+                       for s in sort_by.split(',')):
+                    options.extend(['--sort-by', sort_by])
+                else:
+                    raise ValueError()
+            if first: options.extend(['--first', str(int(first))])
+            if last: options.extend(['--last', str(int(last))])
+        return kwargs
+
+    def _handle_common_options(self, options, **kwargs):
+        # TODO: handle a useful subset of
+        # https://borgbackup.readthedocs.io/en/stable/usage/general.html#common-options
+        raise NotImplementedError()
+
+    def _handle_unknown_arguments(self, remaining):
+        if remaining:
+            raise TypeError("Unknown keyword arguments {}",
+                            ', '.join(remaining.keys())
+                            )
+
     # borg-check also takes an archive instead of a full repo as argument, this
     # is not supported here fore now.
     def check(self, repo,
               repos_only=False, archives_only=False,
               verify_data=False, repair=False, save_space=False,
-              prefix=None, glob=None, sort_by=None, first=0, last=0,
-              handlers=None,
+              handlers=None, **kwargs,
               ):
         if repos_only and verify_data:
             raise ValueError('borg-check options --repository-only and '
@@ -388,14 +419,8 @@ class Borg():
         if verify_data: options.append('--verify-data')
         if repair: options.append('--repair')
         if save_space: options.append('--save-space')
-        if prefix: options.extend(['--prefix', prefix])
-        if glob: options.extend(['--glob', glob])
-        if sort_by:
-            if not all(s in ['timestamp', 'name', 'id'] for s in sort_by.split(',')):
-                raise ValueError()
-            options.extend(['--sort-by', sort_by])
-        if first: options.extend(['--first', str(int(first))])
-        if last: options.extend(['--last', str(int(last))])
+        remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        self._handle_unknown_arguments(remaining)
         options.append(f"{repo}")
 
         with repo:
@@ -442,48 +467,29 @@ class Borg():
         raise NotImplementedError()
 
     def list(self, repo,
-             prefix=None, glob=None, first=0, last=0,
              # TODO: support exclude patterns.
-             sort_by='', additional_keys=[], pandas=True, short=False,
-             handlers=None):
+             additional_keys=[], pandas=True, short=False,
+             handlers=None,
+             **kwargs):
         # NOTE: This can list either repo contents (archives) or archive
         # contents (files). Respect that, maybe even split in separate methods
         # (since e.g. repos should have the 'short' option to only return the
         # prefix, while only archives should have the pandas option(?)).
         options = repo.borg_args()
 
-        if prefix and glob:
-            raise ValueError("Cannot combine archive matching by prefix and "
-                             "glob pattern!")
-        if prefix:
-            options.extend(['--prefix', prefix])
-        if glob:
-            options.extend(['--glob-archives', glob])
-
         if short:
             # default format: 'prefix     Mon, 2017-05-22 02:52:37'
             # --short format: 'prefix'
-            pass
-
-        if sort_by:
-            if sort_by in 'timestamp name id'.split():
-                options.extend(['--sort-by', sort_by])
-            elif all(s in 'timestamp name id'.split() for s in sort_by):
-                options.extend(['--sort-by', ','.join(sort_by)])
-            else:
-                raise ValueError("Invalid sorting criterion {sort_by} for "
-                                 "file listing!")
-
-        if first:
-            options.extend(['--first', str(first)])
-        if last:
-            options.extend(['--last', str(last)])
+            raise NotImplementedError()
 
         if additional_keys:
             # TODO: validate?
             options.extend(['--format',
                             ' '.join(f'{{{k}}}' for k in additional_keys)
                             ])
+
+        remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        self._handle_unknown_arguments(remaining)
 
         output = []
         with repo:
@@ -499,14 +505,26 @@ class Borg():
         else:
             return list(output)
 
-    def info(self, repo, handlers=None):
+    def info(self, repo, handlers=None
+             **kwargs):
+        options = []
+        remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        self._handle_unknown_arguments(remaining)
+
         raise NotImplementedError()
 
     def delete(self, repo, handlers=None):
         raise NotImplementedError()
 
-    def prune(self, repo, keep, prefix=None, verbose=True,
-              handlers=None):
+    def prune(self, repo, keep, verbose=True, save_space=False,
+              handlers=None, **kwargs):
+        # TODO: support --keep-within INTERVAL
+        # TODO: support --list
+        # TODO: support --stats
+        # TODO: support --force
+        # TODO: support --dry-run (generally implement dryrun support for the
+        # whole class: on two levels, not running borg at all, and running
+        # borg --dry-run
         if not keep:
             raise ValueError('No archives to keep given for pruning!')
         options = repo.borg_args()
@@ -517,9 +535,14 @@ class Borg():
         if verbose:
             options.extend(['--list', '--stats'])
         for interval, number in keep.items():
+            if not interval in ['last', 'secondly', 'minutely', 'hourly',
+                                'daily', 'weekly', 'monthly', 'yearly']:
+                raise ValueError("Invalid interval '{}' specified for
+                                 pruning".format(interval))
             options.extend([f'--keep-{interval}', str(number)])
-        if prefix:
-            options.extend(['--prefix', prefix])
+        if save_space: options.append('--save-space')
+        remaining = self._handle_archive_filter_options(False, options, **kwargs)
+        self._handle_unknown_arguments(remaining)
         options.append(f"{repo}")
 
         with repo:
