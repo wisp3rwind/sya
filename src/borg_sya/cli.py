@@ -134,6 +134,7 @@ def create(cx, progress, tasks):
         cx.info(f'-- Done backing up {task}.')
 
 
+# TODO: support --archives-only, --repository-only
 @main.command(help="Perform a check for repository consistency. "
                    "Repositories can either be specified directly or "
                    "by task. If neither is provided, check all.")
@@ -142,9 +143,13 @@ def create(cx, progress, tasks):
 @click.option('-r/-t', '--repo/--task', 'repo', default=False,
               help="Whether to directly name repositories to check or select "
                    "them from tasks.")
+@click.option('--repair', 'repair', default=False,
+              help="Attempt to repair any inconsitencies found")
+@click.option('--verify-data', 'verify_data', default=False,
+              help="Perform cryptographic archive data integrity verification.")
 @click.argument('items', nargs=-1)
 @click.pass_obj
-def check(cx, progress, repo, items):
+def check(cx, progress, repo, repair, verify_data, items):
     if repo:
         repos = cx.validate_repos(items)
     else:
@@ -156,7 +161,7 @@ def check(cx, progress, repo, items):
                            "check it",
                            f"when checking repository {repo.name}."
                            ):
-            repo.check()
+            repo.check(repair=repair, verify_data=verify_data)
         cx.info(f'-- Done checking {repo.name}.')
 
 
