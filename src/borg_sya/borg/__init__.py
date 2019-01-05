@@ -374,11 +374,11 @@ class Borg():
     def init(self):
         raise NotImplementedError()
 
-    def _handle_archive_filter_options(self, sorting=False, options,
+    def _handle_archive_filter_options(self, sorting, options,
             prefix=None, glob_archives=None, sort_by=None, first=0, last=0,
             **kwargs
             ):
-        if prefix and glob:
+        if prefix and glob_archives:
             raise InvalidBorgOptions(
                     "options --glob-archives and --prefix conflict"
                     )
@@ -512,8 +512,7 @@ class Borg():
         else:
             return list(output)
 
-    def info(self, repo, handlers=None
-             **kwargs):
+    def info(self, repo, handlers=None, **kwargs):
         options = []
         remaining = self._handle_archive_filter_options(True, options, **kwargs)
         self._handle_unknown_arguments(remaining)
@@ -544,8 +543,8 @@ class Borg():
         for interval, number in keep.items():
             if not interval in ['last', 'secondly', 'minutely', 'hourly',
                                 'daily', 'weekly', 'monthly', 'yearly']:
-                raise InvalidBorgOptions("Invalid interval '{}' specified for
-                                 pruning".format(interval))
+                raise InvalidBorgOptions("Invalid interval '{}' specified for "
+                                 "pruning".format(interval))
             options.extend([f'--keep-{interval}', str(number)])
         if save_space: options.append('--save-space')
         remaining = self._handle_archive_filter_options(False, options, **kwargs)
