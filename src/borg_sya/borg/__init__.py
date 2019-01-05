@@ -324,26 +324,27 @@ class Borg():
         commandline.extend(options)
 
         self._log.debug(format_commandline(commandline))
-        self._p = p = Popen(commandline, env=env,
-                            stdout=PIPE, stderr=PIPE,
-                            )
+        if not self.dryrun:
+            self._p = p = Popen(commandline, env=env,
+                                stdout=PIPE, stderr=PIPE,
+                                )
 
-        self._running = True
+            self._running = True
 
-        for stdout, msg in self._communicate(p, stdout='raw',
-                                                stderr='json'):
-            if output and stdout is not None:
-                outbuf.append(stdout)
-            elif msg:
-                handlers._dispatch(msg)
+            for stdout, msg in self._communicate(p, stdout='raw',
+                                                    stderr='json'):
+                if output and stdout is not None:
+                    outbuf.append(stdout)
+                elif msg:
+                    handlers._dispatch(msg)
 
-        self._running = False
+            self._running = False
 
-        if self._log_json == 'raw':
-            # Maybe not a good idea because this might include listings with
-            # potentially many thousand items
-            for line in outbuf:
-                self._log.debug(('[JSON OUT] ' + line.decode('utf8')).rstrip('\n'))
+            if self._log_json == 'raw':
+                # Maybe not a good idea because this might include listings with
+                # potentially many thousand items
+                for line in outbuf:
+                    self._log.debug(('[JSON OUT] ' + line.decode('utf8')).rstrip('\n'))
 
         return(outbuf)
 

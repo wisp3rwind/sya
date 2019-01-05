@@ -393,6 +393,7 @@ class SyaSafeLoader(SafeLoader):
 class Context():
     def __init__(self, confdir, dryrun, verbose, term, log, repos, tasks):
         self.confdir = confdir
+        self.borg = Borg(dryrun)
         self.dryrun = dryrun
         self.term = term
         self.log = log
@@ -400,9 +401,6 @@ class Context():
         self.repos = repos or dict()
         self.tasks = tasks or dict()
         self.handler_factory = None
-
-    def attach_borg(self):
-        self.borg = Borg(self.dryrun)
 
     @classmethod
     def from_configuration(cls, confdir, conffile):
@@ -435,7 +433,6 @@ class Context():
                  verbose=verbose, term=term, log=log,
                  repos=None, tasks=None,
                  )
-        cx.attach_borg()
         cx.repos = {repo: Repository.from_yaml(repo, rcfg, cx)
                     for repo, rcfg in cfg['repositories'].items()
                     }
@@ -461,6 +458,15 @@ class Context():
                 self.log.setLevel(logging.DEBUG)
             else:
                 self.log.setLevel(logging.WARNING)
+
+    @property
+    def dryrun(self):
+        return self._dryrun
+
+    @dryrun.setter
+    def dryrun(self, value):
+        self._dryrun = value
+        self.borg.dryrun = value
 
     def validate_repos(self, repos):
         try:
