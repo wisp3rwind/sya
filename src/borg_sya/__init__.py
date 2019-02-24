@@ -335,10 +335,20 @@ class Task():
         includes = [i.rstrip('\r\n') for i in includes]
         excludes = [e.rstrip('\r\n') for e in excludes]
 
+        # TODO: Proper error handling for invalid paths
         assert(all(os.path.isabs(i) for i in includes))
         assert(all(os.path.isabs(e) for e in excludes))
 
         if self.path_prefix:
+            assert(os.path.isabs(self.path_prefix))
+            # Strip the initial '/' such that os.path.join will treat these
+            # as relative paths
+            assert(all(i.startswith(os.sep) for i in includes))
+            assert(all(e.startswith(os.sep) for e in excludes))
+
+            includes = [i.lstrip(os.sep) for i in includes]
+            excludes = [e.lstrip(os.sep) for e in excludes]
+
             includes = [os.path.join(self.path_prefix, i) for i in includes]
             excludes = [os.path.join(self.path_prefix, e) for e in excludes]
 
