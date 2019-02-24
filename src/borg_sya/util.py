@@ -27,8 +27,22 @@ def isexec(path):
         return os.access(path, os.X_OK)
 
 
+INDENT = 4 * ' '
 def format_commandline(args):
-    return ' '.join(['\n    ' + a if a.startswith('-') else a for a in args])
+    lines = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith('-'):
+            if (i + 1) < len(args) and not args[i + 1].startswith('-'):
+                lines.append(INDENT + a + ' ' + args[i + 1])
+                i += 1
+            else:
+                lines.append(INDENT + a)
+        else:
+            lines.append(INDENT + a)
+        i += 1
+    return '\n'.join(lines)
 
 
 class LockInUse(Exception):
