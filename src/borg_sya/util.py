@@ -189,7 +189,7 @@ class Script(YAMLObject):
     def run(self,
             log, args=None, env=None,
             dryrun=False, capture_out=True,
-            dir=None, pretend=False):
+            dir=None):
         if self.script:
             self.log = log
             self.args = args
@@ -197,9 +197,7 @@ class Script(YAMLObject):
             self.dryrun = dryrun
             self.capture_out = capture_out
             self.dir = dir
-            self._pretend = pretend
             self._run()
-            self._pretend = False
 
     def _run(self):
         raise NotImplementedError()
@@ -237,8 +235,10 @@ class ExternalScript(Script):
             cmdline = [script]
             if self.args is not None:
                 cmdline.extend(self.args)
-            if self._pretend:
-                return f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}"
+            if self.dryrun:
+                msg = f"$ {cmdline if isinstance(cmdline, str) else ' '.join(cmdline)}"
+                self.log.info(msg)
+                return msg
             else:
                 return(self.run_popen(cmdline))
         else:
@@ -255,8 +255,10 @@ class ShellScript(Script):
         if self.args:
             # logging.debug("ShellScript doesn't support `args`.")
             pass
-        if self._pretend:
-            return indent(self.script)
+        if self.dryrun:
+            msg = indent(self.script)
+            self.log.info(msg)
+            return msg
         else:
             return self.run_popen(self.script, shell=True)
 
@@ -270,8 +272,10 @@ class PythonScript(Script):
         if self.args or self.env:
             raise NotImplementedError()
 
-        if self._pretend:
-            return indent(f">>> {'... '.join(script.splitlines(keepends=True))}")
+        if self.dryrun:
+            msg = indent(f">>> {'... '.join(script.splitlines(keepends=True))}")
+            self.log.info(msg)
+            return msg
         else:
             # Propagate exceptions
             return(exec(self.script))

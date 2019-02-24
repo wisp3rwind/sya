@@ -31,6 +31,7 @@
 
 
 from functools import wraps
+import itertools
 import logging
 import os
 
@@ -75,38 +76,35 @@ class PrePostScript(LazyReentrantContextmanager):
     def _run_script(self, script, args=None, env=None):
         if script:
             assert(isinstance(script, util.Script))
-            if not self.dryrun:
-                script.run(args=args, env=env,
-                           log=self.log, dryrun=self.dryrun,
-                           dir=self.dir)
-            else:
-                self.log.info(
-                    script.run(pretend=True,
-                               args=args, env=env,
-                               log=self.log, dryrun=self.dryrun,
-                               dir=self.dir)
-                )
+            res = script.run(args=args, env=env,
+                       log=self.log, dryrun=self.dryrun,
+                       dir=self.dir)
 
     def _announce(self, msg):
-        msg = "Running " + msg
         if not self.dryrun:
-            self.log.debug(msg)
+            self.log.debug("Running " + msg)
         else:
-            self.log.info(msg)
+            self.log.info("Would run " + msg)
 
     def _enter(self):
         # Exceptions from the pre- and post-scripts are intended to
         # propagate!
         self._announce(self.pre_desc)
-        for script in self.pre:
-            self._run_script(script)
+        if self.pre:
+            for script in self.pre:
+                self._run_script(script)
+        elif self.dryrun:
+            self.log.info("    (no scripts specified)")
 
     def _exit(self, type, value, traceback):
         self._announce(self.post_desc)
-        for script in self.post:
-            # Maybe use an environment variable instead?
-            # (BACKUP_STATUS=<borg returncode>)
-            self._run_script(script, args=[str(1 if type else 0)])
+        if self.post:
+            for script in self.post:
+                # Maybe use an environment variable instead?
+                # (BACKUP_STATUS=<borg returncode>)
+                self._run_script(script, args=[str(1 if type else 0)])
+        elif self.dryrun:
+            self.log.info("    (no scripts specified)")
 
 
 # Check if we want to run this backup task
@@ -477,6 +475,11 @@ class Context():
     def dryrun(self, value):
         self._dryrun = value
         self.borg.dryrun = value
+        for obj in itertools.chain(
+                getattr(self, 'tasks', {}).values(),
+                getattr(self, 'repos', {}).values()
+                ):
+            obj.scripts.dryrun = value
 
     def validate_repos(self, repos):
         try:
