@@ -146,7 +146,7 @@ def create(cx, progress, tasks):
               help="Whether to directly name repositories to check or select "
                    "them from tasks.")
 @click.option('--repair', 'repair', default=False,
-              help="Attempt to repair any inconsitencies found")
+              help="Attempt to repair any inconsistencies found")
 @click.option('--verify-data', 'verify_data', default=False,
               help="Perform cryptographic archive data integrity verification.")
 @click.argument('items', nargs=-1)
