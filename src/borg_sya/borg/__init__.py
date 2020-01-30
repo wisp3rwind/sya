@@ -542,11 +542,17 @@ class Borg():
         if verbose:
             options.extend(['--list', '--stats'])
         for interval, number in keep.items():
-            if not interval in ['last', 'secondly', 'minutely', 'hourly',
+            if interval == 'within':
+                if type(number) != str:
+                    raise InvalidBorgOptions("Invalid interval '{}' specified "
+                            "for --keep-within when pruning".format(interval))
+                options.extend([f'--keep-within', number])
+            elif interval in ['last', 'secondly', 'minutely', 'hourly',
                                 'daily', 'weekly', 'monthly', 'yearly']:
+                options.extend([f'--keep-{interval}', str(number)])
+            else:
                 raise InvalidBorgOptions("Invalid interval '{}' specified for "
                                  "pruning".format(interval))
-            options.extend([f'--keep-{interval}', str(number)])
         if save_space: options.append('--save-space')
         remaining = self._handle_archive_filter_options(False, options, **kwargs)
         self._handle_unknown_arguments(remaining)

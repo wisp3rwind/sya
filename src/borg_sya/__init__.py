@@ -206,7 +206,8 @@ class Repository(borg.Repository):
 
 
 class Task():
-    KEEP_INTERVALS = ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
+    KEEP_INTERVALS = ('within', 'hourly', 'daily', 'weekly', 'monthly',
+            'yearly')
 
     def __init__(self, name, cx,
                  repo, enabled, prefix, keep,
