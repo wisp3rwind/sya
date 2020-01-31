@@ -178,10 +178,12 @@ class Repository(borg.Repository):
         self.scripts.__exit__(*exc)
         self._lock.__exit__(*exc)
 
-    def check(self, **kwargs):
+    def check(self, progress, **kwargs):
         with self:
             self.cx.borg.check(self,
-                               handlers=self.cx.handler_factory(),
+                               handlers=self.cx.handler_factory(
+                                   progress=progress,
+                               ),
                                **kwargs
                                )
 
@@ -350,7 +352,7 @@ class Task():
                 includes, excludes,
                 prefix=f'{self.prefix}-{{now:%Y-%m-%d_%H:%M:%S}}',
                 stats=True,
-                handlers=self.cx.handler_factory()
+                handlers=self.cx.handler_factory(progress=progress)
             )
 
     @if_enabled

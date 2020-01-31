@@ -17,10 +17,12 @@ APP_NAME = 'borg-sya'
 
 
 class BorgHandlers(DefaultHandlers):
-    def __init__(self, log, cli):
+    def __init__(self, log, cli, **kwargs):
+        # FIXME: actually respect the progress option
+        kwargs.pop('progress')
         self.cli = cli
         self._spinners = dict()
-        super().__init__(log)
+        super().__init__(log, **kwargs)
 
     def __del__(self):
         for contextmanager, _ in self._spinners.values():
@@ -84,7 +86,7 @@ def main(ctx, confdir, dryrun, verbose):
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
     cx.dryrun = dryrun
-    cx.handler_factory = lambda: BorgHandlers(cx.log, cx.term)
+    cx.handler_factory = lambda **kw: BorgHandlers(cx.log, cx.term, **kw)
     ctx.obj = cx
 
 
