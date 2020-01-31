@@ -13,6 +13,7 @@ from .defs import (
     _MESSAGE_TYPES,
     _PROMPT_MESSAGE_IDS,
     _OPERATION_MESSAGE_IDS,
+    _MESSAGE_IDS,
     _VERBOSITY_OPTIONS,
 )
 from .helpers import (
@@ -168,6 +169,14 @@ class DefaultHandlers():
         # TODO: should these messages be passed on?
         if msg.get('name') not in ['borg.output.progress']:
             self.log.info(f"[BORG] {msg.get('message', '')}".rstrip('\n'))
+
+    def human_readable_msgid(self, msgid):
+        try:
+            s = _MESSAGE_IDS[msgid]
+        except KeyError:
+            s = msgid
+
+        return s or msgid
 
     def onProgressMessage(self, operation, msgid, finished, time,
             message=None, **msg):

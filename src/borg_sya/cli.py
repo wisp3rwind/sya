@@ -67,7 +67,7 @@ class BorgHandlers(DefaultHandlers):
             self._close_spinner(('onProgressMessage', operation))
         else:
             spinner  = self._get_spinner(('onProgressMessage', operation))
-            spinner.update(f"{msgid}: {(message or '')}")
+            spinner.update(f"{self.human_readable_msgid(msgid)}: {(message or '')}")
 
     def onProgressPercent(self, operation, msgid, finished, time,
             message=None, current=None, info=None, total=None, **msg):
@@ -75,7 +75,7 @@ class BorgHandlers(DefaultHandlers):
             self._close_spinner(('onProgressPercent', operation))
         else:
             spinner  = self._get_spinner(('onProgressPercent', operation))
-            spinner.update(f"{msgid}: {(message or '')}")
+            spinner.update(f"{self.human_readable_msgid(msgid)}: {(message or '')}")
 
 
 
