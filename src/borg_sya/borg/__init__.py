@@ -467,7 +467,7 @@ class Borg():
             # actually, this is already implied by --json
             options.append('--stats')
         remaining = self._handle_common_options(**kwargs)
-        self._handle_unknown_arguments(**remaining)
+        self._handle_unknown_arguments(remaining)
         for e in excludes:
             options.extend(['--exclude', e])
         options.append(f'{repo}::{prefix}')
