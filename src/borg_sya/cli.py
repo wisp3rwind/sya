@@ -155,6 +155,25 @@ def create(cx, progress, tasks):
         cx.info(f'-- Done backing up {task}.')
 
 
+@main.command(help="Prune archives from the given task. If no task is "
+        "specified, run all.")
+@click.option('-p', '--progress/--no-progress',
+              help="Show progress.")
+@click.argument('tasks', nargs=-1)
+@click.pass_obj
+def prune(cx, progress, tasks):
+    tasks, repos = cx.validate_tasks(tasks)
+    for task in tasks:
+        cx.info(f'-- Pruning archives from {task}...')
+        with task(lazy=True):
+            with handle_errors(cx, task.repo,
+                               f"prune archives from task '{task}'",
+                               f"pruning archives from task '{task}'",
+                               ) as status:
+                task.prune()
+        cx.info(f'-- Done pruning archives from {task}.')
+
+
 # TODO: support --archives-only, --repository-only
 @main.command(help="Perform a check for repository consistency. "
                    "Repositories can either be specified directly or "
