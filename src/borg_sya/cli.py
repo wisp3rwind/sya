@@ -19,7 +19,7 @@ APP_NAME = 'borg-sya'
 class BorgHandlers(DefaultHandlers):
     def __init__(self, log, cli, **kwargs):
         # FIXME: actually respect the progress option
-        kwargs.pop('progress')
+        kwargs.pop('progress', None)
         self.cli = cli
         self._spinners = dict()
         super().__init__(log, **kwargs)
