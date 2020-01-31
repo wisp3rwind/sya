@@ -173,8 +173,15 @@ class DefaultHandlers():
             message=None, **msg):
         pass
 
-    def onProgressPercent(self, operation, msgid, finished, message, current,
-            info, total, time, **msg):
+    def onProgressPercent(self, operation, msgid, finished, time,
+            message=None, current=None, info=None, total=None, **msg):
+        """ Parse a progress message including percentage. Note that
+        the fields
+            `message, current, info, total`
+        are not included in the JSON when `finished == True`.
+        `message` contains a pre-formatted string made out of `current`, `info`
+        and `total`.
+        """
         pass
 
     def format_archive_progress(self,
