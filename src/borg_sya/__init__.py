@@ -217,8 +217,19 @@ class Task():
                 raise InvalidConfigurationError("'repository' is mandatory "
                                                 "for each task in config")
 
-            keep = cfg.get('keep', {})
-            if not all(k in cls.KEEP_INTERVALS for k in keep):
+            def verify_intervals(intervals):
+                if not all(k in cls.KEEP_INTERVALS for k in intervals):
+                    raise InvalidConfigurationError()
+            keep = cfg.get('keep', [])
+            if isinstance(keep, dict):
+                # A single prune run
+                verify_intervals(keep)
+                keep = [keep]
+            elif isinstance(keep, list):
+                # A list of multiple, succesive prune runs
+                for k in keep:
+                    verify_intervals(k)
+            else:
                 raise InvalidConfigurationError()
 
             include_file = cfg.get('include-file', None)
@@ -346,11 +357,12 @@ class Task():
     def prune(self):
         try:
             with self:
-                self.cx.borg.prune(self.repo,
-                                   self.keep,
-                                   prefix=f'{self.prefix}-',
-                                   handlers=self.cx.handler_factory()
-                                   )
+                for intervals in self.keep:
+                    self.cx.borg.prune(self.repo,
+                                       intervals,
+                                       prefix=f'{self.prefix}-',
+                                       handlers=self.cx.handler_factory()
+                                       )
         except BorgError as e:
             self.cx.error(e)
             self.cx.error(f"'{self.name}' old files cleanup failed. "

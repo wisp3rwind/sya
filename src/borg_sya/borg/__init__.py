@@ -523,7 +523,7 @@ class Borg():
     def delete(self, repo, handlers=None):
         raise NotImplementedError()
 
-    def prune(self, repo, keep, verbose=True, save_space=False,
+    def prune(self, repo, intervals, verbose=True, save_space=False,
               handlers=None, **kwargs):
         # TODO: support --keep-within INTERVAL
         # TODO: support --list
@@ -532,8 +532,8 @@ class Borg():
         # TODO: support --dry-run (generally implement dryrun support for the
         # whole class: on two levels, not running borg at all, and running
         # borg --dry-run
-        if not keep:
-            raise InvalidBorgOptions('No archives to keep given for pruning')
+        if not intervals:
+            raise InvalidBorgOptions('No intervals specified to keep archives in when pruning')
         options = repo.borg_args()
 
         # TODO: Is the verbose option necessary here, or should --list --stats
@@ -541,7 +541,7 @@ class Borg():
         # handlers class?
         if verbose:
             options.extend(['--list', '--stats'])
-        for interval, number in keep.items():
+        for interval, number in intervals.items():
             if interval == 'within':
                 if type(number) != str:
                     raise InvalidBorgOptions("Invalid interval '{}' specified "
