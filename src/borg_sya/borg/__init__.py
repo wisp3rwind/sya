@@ -148,12 +148,13 @@ class DefaultHandlers():
             f = self._onUnhandled
         elif msg['type'] == 'question_env_answer':
             f = self._onUnhandled
+        else:
+            f = self._onUnhandled
 
         f(**msg)
 
     def _onUnhandled(self, **msg):
-        # TODO: maybe debug-log unhandled messages?
-        pass
+        self.log.debug(f"Unknown message received from borg, type={msg['type']}")
 
     def onError(self, **msg):
         # Does this always mean that there was a fatal error, or would it be
