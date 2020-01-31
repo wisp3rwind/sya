@@ -1,8 +1,13 @@
 # Overview
 
-[`Sya`][2] is a very basic frontend to [`borg`][1]. Its goal is to
+[`Sya`][sya-wisperwind] is a very basic frontend to [`borg`][borg-docs]. Its goal is to
 provide easy management of multiple independent backup tasks with an intuitive
 commandline interface.
+
+ [borg-docs]: https://borgbackup.readthedocs.io/
+ [sya-niol]: https://github.com/niol/sya
+ [sya-wisperwind]: https://github.com/wisp3rwind/sya
+
 
 ## Under the hood & historical remarks
 Basically, it constructs `borg` command lines from repository and task
@@ -22,9 +27,6 @@ Some features that I would like to implement in the future include
 - [ ] Desktop notifications
 - [ ] tray icon with status similar to time machine
 - [ ] better integration with btrfs snapshots
-
- [1]: https://borgbackup.readthedocs.io/
- [2]: https://github.com/niol/sya
 
 
 ## Configuration
