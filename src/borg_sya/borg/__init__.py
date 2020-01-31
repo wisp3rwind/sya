@@ -169,10 +169,12 @@ class DefaultHandlers():
         if msg.get('name') not in ['borg.output.progress']:
             self.log.info(f"[BORG] {msg.get('message', '')}".rstrip('\n'))
 
-    def onProgressMessage(self, **msg):
+    def onProgressMessage(self, operation, msgid, finished, time,
+            message=None, **msg):
         pass
 
-    def onProgressPercent(self, **msg):
+    def onProgressPercent(self, operation, msgid, finished, message, current,
+            info, total, time, **msg):
         pass
 
     def format_archive_progress(self,
@@ -402,6 +404,7 @@ class Borg():
         # TODO: handle a useful subset of
         # https://borgbackup.readthedocs.io/en/stable/usage/general.html#common-options
         # Note that --progress, --verbose are handled by DefaultHandlers!
+        # Also, some of the options are handled by the borg.Repository class!
         return kwargs
 
     def _handle_unknown_arguments(self, remaining):

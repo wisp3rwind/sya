@@ -61,6 +61,23 @@ class BorgHandlers(DefaultHandlers):
 
         spinner.update(text)
 
+    def onProgressMessage(self, operation, msgid, finished, time, message=None,
+            **msg):
+        if finished:
+            self._close_spinner(('onProgressMessage', operation))
+        else:
+            spinner  = self._get_spinner(('onProgressMessage', operation))
+            spinner.update(f"{msgid}: {(message or '')}")
+
+    def onProgressPercent(self, operation, msgid, finished, message, current,
+            info, total, time, **msg):
+        if finished:
+            self._close_spinner(('onProgressPercent', operation))
+        else:
+            spinner  = self._get_spinner(('onProgressPercent', operation))
+            spinner.update(f"{msgid}: {(message or '')}")
+
+
 
 @click.group()
 @click.option('-d', '--config-dir', 'confdir',
