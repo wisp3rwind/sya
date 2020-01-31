@@ -163,7 +163,11 @@ def check(cx, progress, repo, repair, verify_data, items):
                            "check it",
                            f"when checking repository {repo.name}."
                            ):
-            repo.check(repair=repair, verify_data=verify_data)
+            repo.check(
+                repair=repair,
+                verify_data=verify_data,
+                progress=progress,
+            )
         cx.info(f'-- Done checking {repo.name}.')
 
 

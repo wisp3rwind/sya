@@ -398,10 +398,11 @@ class Borg():
             if last: options.extend(['--last', str(int(last))])
         return kwargs
 
-    def _handle_common_options(self, options, **kwargs):
+    def _handle_common_options(self, **kwargs):
         # TODO: handle a useful subset of
         # https://borgbackup.readthedocs.io/en/stable/usage/general.html#common-options
-        raise NotImplementedError()
+        # Note that --progress, --verbose are handled by DefaultHandlers!
+        return kwargs
 
     def _handle_unknown_arguments(self, remaining):
         if remaining:
@@ -427,6 +428,7 @@ class Borg():
         if repair: options.append('--repair')
         if save_space: options.append('--save-space')
         remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        remaining = self._handle_common_options(**remaining)
         self._handle_unknown_arguments(remaining)
         options.append(f"{repo}")
 
@@ -435,7 +437,7 @@ class Borg():
 
     def create(self, repo, includes, excludes=[],
                prefix='{hostname}', stats=False,
-               handlers=None):
+               handlers=None, **kwargs):
         if not includes:
             raise InvalidBorgOptions(
                 'No paths given to include in the archive',
@@ -445,6 +447,8 @@ class Borg():
         if stats:
             # actually, this is already implied by --json
             options.append('--stats')
+        remaining = self._handle_common_options(**kwargs)
+        self._handle_unknown_arguments(**remaining)
         for e in excludes:
             options.extend(['--exclude', e])
         options.append(f'{repo}::{prefix}')
@@ -454,11 +458,14 @@ class Borg():
             self._run('create', options, handlers=handlers)
 
     def mount(self, repo, archive=None, mountpoint='/mnt', foreground=False,
-              handlers=None):
+              handlers=None, **kwargs):
         raise NotImplementedError()
         options = repo.borg_args()
         if foreground:
             options.append('--foreground')
+
+        remaining = self._handle_common_options(**kwargs)
+        self._handle_unknown_arguments(remaining)
 
         if archive:
             target = f'{repo}::{archive}'
@@ -469,10 +476,10 @@ class Borg():
         with repo:
             self._run('mount', options, handlers=handlers)
 
-    def umount(self, repo, handlers=None):
+    def umount(self, repo, handlers=None, **kwargs):
         raise NotImplementedError()
 
-    def extract(self, repo, handlers=None):
+    def extract(self, repo, handlers=None, **kwargs):
         raise NotImplementedError()
 
     def list(self, repo,
@@ -498,6 +505,7 @@ class Borg():
                             ])
 
         remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        remaining = self._handle_common_options(**remaining)
         self._handle_unknown_arguments(remaining)
 
         output = []
@@ -517,6 +525,7 @@ class Borg():
     def info(self, repo, handlers=None, **kwargs):
         options = []
         remaining = self._handle_archive_filter_options(True, options, **kwargs)
+        remaining = self._handle_common_options(**remaining)
         self._handle_unknown_arguments(remaining)
 
         raise NotImplementedError()
@@ -556,6 +565,7 @@ class Borg():
                                  "pruning".format(interval))
         if save_space: options.append('--save-space')
         remaining = self._handle_archive_filter_options(False, options, **kwargs)
+        remaining = self._handle_common_options(**remaining)
         self._handle_unknown_arguments(remaining)
         options.append(f"{repo}")
 
