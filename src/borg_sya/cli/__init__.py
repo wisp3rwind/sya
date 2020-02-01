@@ -6,13 +6,10 @@ import sys
 import time
 import traceback
 
-from . import InvalidConfigurationError, Context
-from .borg import BorgError, DefaultHandlers, InvalidBorgOptions
-from .util import LockInUse, truncate_path
-
-DEFAULT_CONFDIR = '/etc/borg-sya'
-DEFAULT_CONFFILE = 'config.yaml'
-APP_NAME = 'borg-sya'
+from ..core import *
+from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
+from ..core.util import LockInUse, truncate_path
+from .terminal import Terminal
 
 
 class BorgHandlers(DefaultHandlers):
@@ -88,8 +85,12 @@ class BorgHandlers(DefaultHandlers):
               help="Be verbose and print stats.")
 @click.pass_context
 def main(ctx, confdir, dryrun, verbose):
+    term = Terminal()
+    handler = logging.StreamHandler(term)
+    handler.terminator = ''
+
     try:
-        cx = Context.from_configuration(confdir, DEFAULT_CONFFILE)
+        cx = Context.from_configuration(handler, confdir, DEFAULT_CONFFILE)
     except OSError:
         print(f"Configuration file at "
               f"'{os.path.join(confdir, DEFAULT_CONFFILE)}' "
@@ -99,10 +100,12 @@ def main(ctx, confdir, dryrun, verbose):
     except InvalidConfigurationError as e:
         print(e, file=sys.stderr)
         raise click.Abort()
+
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
+
     cx.dryrun = dryrun
-    cx.handler_factory = lambda **kw: BorgHandlers(cx.log, cx.term, **kw)
+    cx.handler_factory = lambda **kw: BorgHandlers(cx.log, term, **kw)
     ctx.obj = cx
 
 
@@ -112,11 +115,11 @@ def exit(cx, *args, **kwargs):
     logging.shutdown()
 
 
-@main.command(help="Launch the GUI.")
-@click.pass_obj
-def gui(cx):
-    from borg_sya import gui
-    gui.main(cx)
+# @main.command(help="Launch the GUI.")
+# @click.pass_obj
+# def gui(cx):
+#     from borg_sya import gui
+#     gui.main(cx)
 
 
 @contextmanager

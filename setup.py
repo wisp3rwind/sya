@@ -5,7 +5,7 @@ import subprocess
 # Compile gresource for GUI application
 subprocess.call(
     ["glib-compile-resources", "--generate", "sya.gresource.xml"],
-    cwd="src/borg_sya/data",
+    cwd="src/borg_sya/gui/data",
 )
 
 
@@ -24,15 +24,13 @@ setup(name='borg_sya',
           'click',
           'pyyaml',
           'wcwidth',
-          'blessings',
-          'pygobject',
       ],
       extras_require={
           "CLI": [
-              # 'blessings',
+              'blessings',
           ],
           "GUI": [
-              # 'pygobject',
+              'pygobject',
           ],
       },
 
@@ -42,12 +40,12 @@ setup(name='borg_sya',
           'console_scripts': [
               'borg-sya = borg_sya.cli:main [CLI]',
           ],
-          # 'gui_scripts': [
-          #     'borg-sya-gui = borg_sya.gui:main [GUI]',
-          # ],
+          'gui_scripts': [
+              'borg-sya-gui = borg_sya.gui:main [GUI]',
+          ],
       },
       package_data={
-          "borg_sya": ["data/*.gresource"]
+          "borg_sya.gui": ["data/*.gresource"]
       },
 
       # List of classifiers: http://pypi.python.org/pypi?%3Aaction=list_classifiers

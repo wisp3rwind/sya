@@ -1,15 +1,24 @@
 import os.path
-
+import sys
+import click
+import logging
 import importlib.resources
 
 import gi
-gi.require_version('Gtk', '3.20')
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gio
 
+from ..core import *
+from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
 
-with importlib.resources.path("borg_sya", "data") as data_dir:
+
+with importlib.resources.path("borg_sya.gui", "data") as data_dir:
     gresources = Gio.resource_load(os.path.join(data_dir, "sya.gresource"))
     Gio.resources_register(gresources)
+
+
+class BorgHandlers(DefaultHandlers):
+    pass
 
 
 class Handlers():
@@ -64,7 +73,7 @@ class RepoListBox(Gtk.ListBox):
             row.set_header(None)
 
 
-def main(cx):
+def gui_main(cx):
     builder = Gtk.Builder()
     builder.add_from_resource("/com/example/Sya/main.ui")
     # builder.add_from_file("gui/data/main.ui")
@@ -85,3 +94,30 @@ def main(cx):
     mainWindow.show_all()
 
     Gtk.main()
+
+
+
+@click.command()
+@click.option('-d', '--config-dir', 'confdir',
+              default=DEFAULT_CONFDIR,
+              help=f"Configuration directory, default is {DEFAULT_CONFDIR}")
+def main(confdir):
+    handler = logging.StreamHandler(sys.stderr)
+
+    try:
+        cx = Context.from_configuration(handler, confdir, DEFAULT_CONFFILE)
+    except OSError:
+        print(f"Configuration file at "
+              f"'{os.path.join(confdir, DEFAULT_CONFFILE)}' "
+              f"not found or not accessible.",
+              file=sys.stderr)
+        raise click.Abort()
+    except InvalidConfigurationError as e:
+        print(e, file=sys.stderr)
+        raise click.Abort()
+
+    cx.verbose = True
+
+    cx.handler_factory = lambda **kw: BorgHandlers(cx.log, **kw)
+
+    gui_main(cx)
