@@ -1,9 +1,10 @@
+import atexit
+import importlib.resources
+import logging
 import os.path
 import sys
-import click
-import logging
-import importlib.resources
 
+import click
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gio
@@ -116,6 +117,7 @@ def main(confdir):
         print(e, file=sys.stderr)
         raise click.Abort()
 
+    atexit.register(logging.shutdown)
     cx.verbose = True
 
     cx.handler_factory = lambda **kw: BorgHandlers(cx.log, **kw)

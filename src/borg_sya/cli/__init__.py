@@ -101,11 +101,13 @@ def main(ctx, confdir, dryrun, verbose):
         print(e, file=sys.stderr)
         raise click.Abort()
 
+    atexit.register(logging.shutdown)
     if verbose:  # if True in the config file, do not set to False here
         cx.verbose = verbose
-
     cx.dryrun = dryrun
+
     cx.handler_factory = lambda **kw: BorgHandlers(cx.log, term, **kw)
+
     ctx.obj = cx
 
 
