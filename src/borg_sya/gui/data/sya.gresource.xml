@@ -4,7 +4,8 @@
     <file compressed="true" preprocess="xml-stripblanks">main.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">repo_info_page.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">repo_list.ui</file>
-    <file compressed="true" preprocess="xml-stripblanks">repo_list_row.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">repo_entry_title.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">repo_entry_detail.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">task_info_page_no_repo.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">task_info_page.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">task_list.ui</file>

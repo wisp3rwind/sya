@@ -32,9 +32,9 @@ class Handlers():
         pass
 
 
-@Gtk.Template.from_resource("/com/example/Sya/repo_list_row.ui")
-class RepoListRow(Gtk.ListBoxRow):
-    __gtype_name__ = "RepoListRow"
+@Gtk.Template.from_resource("/com/example/Sya/repo_entry_title.ui")
+class RepoEntryTitle(Gtk.Grid):
+    __gtype_name__ = "RepoEntryTitle"
 
     repo_icon = Gtk.Template.Child()
     repo_name_label = Gtk.Template.Child()
@@ -42,8 +42,6 @@ class RepoListRow(Gtk.ListBoxRow):
     repo_avail_label = Gtk.Template.Child()
     repo_total_label = Gtk.Template.Child()
     repo_usage_level = Gtk.Template.Child()
-
-    grid = Gtk.Template.Child()
 
     def __init__(self, repo):
         super().__init__()
@@ -67,6 +65,19 @@ class RepoListRow(Gtk.ListBoxRow):
             self.repo_usage_level.props.min_value = 0.0
             self.repo_usage_level.props.max_value = 1.0
             self.repo_usage_level.props.value = 0.42
+
+
+@Gtk.Template.from_resource("/com/example/Sya/repo_entry_detail.ui")
+class RepoEntryDetail(Gtk.Box):
+    __gtype_name__ = "RepoEntryDetail"
+
+    def __init__(self, repo):
+        super().__init__()
+
+        if repo == "add_new":
+            pass
+        else:
+            pass
 
 
 @Gtk.Template.from_resource("/com/example/Sya/task_list_row.ui")
@@ -120,9 +131,11 @@ class RepoList(Gtk.Box):
         self.props.visible = flag
 
     def populate(self, repo):
-        row = RepoListRow(repo)
-        row.props.height_request = self.i * 50
-        self.i += 1
+        row = Gtk.ListBoxRow()
+        exp = CustomExpander()
+        row.add(exp)
+        exp.set_title(RepoEntryTitle(repo))
+        exp.add(RepoEntryDetail(repo))
         self.repo_list_box.add(row)
 
         self.hide(False)
