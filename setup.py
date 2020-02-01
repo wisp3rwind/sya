@@ -3,7 +3,7 @@ import subprocess
 
 
 # Compile gresource for GUI application
-subprocess.call(
+subprocess.check_call(
     ["glib-compile-resources", "--generate", "sya.gresource.xml"],
     cwd="src/borg_sya/gui/data",
 )
