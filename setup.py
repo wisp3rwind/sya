@@ -1,4 +1,12 @@
 from setuptools import setup, find_packages
+import subprocess
+
+
+# Compile gresource for GUI application
+subprocess.call(
+    ["glib-compile-resources", "--generate", "sya.gresource.xml"],
+    cwd="src/borg_sya/data",
+)
 
 
 setup(name='borg_sya',
@@ -15,14 +23,31 @@ setup(name='borg_sya',
           'borgbackup',
           'click',
           'pyyaml',
-          'blessings',
           'wcwidth',
+          'blessings',
+          'pygobject',
       ],
+      extras_require={
+          "CLI": [
+              # 'blessings',
+          ],
+          "GUI": [
+              # 'pygobject',
+          ],
+      },
 
       packages=find_packages('src'),
       package_dir={'': 'src'},
       entry_points={
-          'console_scripts': ['borg-sya = borg_sya.cli:main'],
+          'console_scripts': [
+              'borg-sya = borg_sya.cli:main [CLI]',
+          ],
+          # 'gui_scripts': [
+          #     'borg-sya-gui = borg_sya.gui:main [GUI]',
+          # ],
+      },
+      package_data={
+          "borg_sya": ["data/*.gresource"]
       },
 
       # List of classifiers: http://pypi.python.org/pypi?%3Aaction=list_classifiers
@@ -39,8 +64,10 @@ setup(name='borg_sya',
           "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
           "Operating System :: Unix",
           "Programming Language :: Python",
-          "Programming Language :: Python :: 3.6",
+          # We use f-strings, which are 3.6+
+          # We use importlib, which is 3.7+
           "Programming Language :: Python :: 3.7",
+          "Programming Language :: Python :: 3.8",
           "Programming Language :: Python :: Implementation",
           "Programming Language :: Python :: Implementation :: CPython",
           # not tested:

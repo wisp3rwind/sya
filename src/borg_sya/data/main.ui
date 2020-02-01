@@ -2,9 +2,41 @@
 <!-- Generated with glade 3.22.1 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
-  <object class="GtkApplicationWindow">
+  <object class="GtkGrid">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+  </object>
+  <object class="GtkApplicationWindow" id="mainWindow">
     <property name="can_focus">False</property>
     <property name="show_menubar">False</property>
+    <signal name="destroy" handler="onDestroy" swapped="no"/>
     <child type="titlebar">
       <object class="GtkHeaderBar">
         <property name="visible">True</property>
@@ -12,10 +44,12 @@
         <property name="spacing">10</property>
         <property name="show_close_button">True</property>
         <child>
-          <object class="GtkImage" id="appicon">
-            <property name="visible">True</property>
-            <property name="can_focus">False</property>
-            <property name="stock">gtk-missing-image</property>
+          <object class="GtkButton" id="back_button">
+            <property name="label">gtk-go-back</property>
+            <property name="can_focus">True</property>
+            <property name="receives_default">True</property>
+            <property name="use_stock">True</property>
+            <signal name="clicked" handler="on_back_button_clicked" swapped="no"/>
           </object>
         </child>
         <child>
@@ -40,11 +74,7 @@
           </packing>
         </child>
         <child type="title">
-          <object class="GtkLabel">
-            <property name="visible">True</property>
-            <property name="can_focus">False</property>
-            <property name="label" translatable="yes">label</property>
-          </object>
+          <placeholder/>
         </child>
         <child>
           <object class="GtkButton" id="abort_all_button">
@@ -71,7 +101,7 @@
         <property name="visible">True</property>
         <property name="can_focus">False</property>
         <child>
-          <object class="GtkBox">
+          <object class="GtkBox" id="repos_page">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <child>
@@ -91,7 +121,57 @@
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
                 <child>
+                  <object class="GtkBox" id="repo_list">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="orientation">vertical</property>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="visible">True</property>
+                        <property name="orientation">vertical</property>
+                        <property name="valign">center</property>
+                        <property name="halign">center</property>
+                        <property name="margin_left">10</property>
+                        <property name="margin_right">10</property>
+                        <property name="margin_top">10</property>
+                        <property name="margin_bottom">10</property>
+                        <property name="hexpand">True</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="visible">True</property>
+                            <property name="label" translatable="yes">Local</property>
+                            <property name="halign">start</property>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkFrame">
+                            <property name="visible">True</property>
+                            <child>
+                              <object class="GtkListBox" id="repo_list_box">
+                                <property name="visible">True</property>
+                                <property name="selection_mode">none</property>
+                                <style>
+                                  <class name="view"/>
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">True</property>
+                        <property name="position">0</property>
+                      </packing>
+                    </child>
+                  </object>
+                </child>
+                <child>
                   <object class="GtkBox" id="add_repo_page">
+                    <property name="name">addRepoPage</property>
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
                     <property name="border_width">4</property>
@@ -100,7 +180,8 @@
                       <object class="GtkLabel">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">&lt;big&gt;&lt;b&gt;No repositories found&lt;/b&gt;&lt;/big&gt;</property>
+                        <property name="halign">start</property>
+                        <property name="label" translatable="yes">&lt;big&gt;&lt;b&gt;Add new repository&lt;/b&gt;&lt;/big&gt;</property>
                         <property name="use_markup">True</property>
                       </object>
                       <packing>
@@ -124,7 +205,8 @@
                       <object class="GtkLabel">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Add a new repository to choose where to create your first backup!</property>
+                        <property name="halign">start</property>
+                        <property name="label" translatable="yes">Add a new backup location!</property>
                       </object>
                       <packing>
                         <property name="expand">False</property>
@@ -137,26 +219,6 @@
                     <property name="name">repo_add</property>
                     <property name="title" translatable="yes">Add repository</property>
                     <property name="icon_name">plus</property>
-                  </packing>
-                </child>
-                <child>
-                  <object class="GtkBox" id="repo_info_page">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="orientation">vertical</property>
-                    <child>
-                      <placeholder/>
-                    </child>
-                    <child>
-                      <placeholder/>
-                    </child>
-                    <child>
-                      <placeholder/>
-                    </child>
-                  </object>
-                  <packing>
-                    <property name="name">repo_1</property>
-                    <property name="title" translatable="yes">Repository 1</property>
                     <property name="position">1</property>
                   </packing>
                 </child>
@@ -262,6 +324,7 @@
                           <packing>
                             <property name="expand">False</property>
                             <property name="fill">True</property>
+                            <property name="padding">5</property>
                             <property name="position">0</property>
                           </packing>
                         </child>
@@ -348,27 +411,6 @@
                     <property name="title" translatable="yes">Add task</property>
                   </packing>
                 </child>
-                <child>
-                  <object class="GtkBox" id="Some task">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="orientation">vertical</property>
-                    <child>
-                      <placeholder/>
-                    </child>
-                    <child>
-                      <placeholder/>
-                    </child>
-                    <child>
-                      <placeholder/>
-                    </child>
-                  </object>
-                  <packing>
-                    <property name="name">some_task_id</property>
-                    <property name="title" translatable="yes">Some Task</property>
-                    <property name="position">1</property>
-                  </packing>
-                </child>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -386,5 +428,32 @@
       </object>
     </child>
   </object>
-  <object class="GtkListStore" id="liststore1"/>
+  <object class="GtkBox" id="repo_info_page">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="orientation">vertical</property>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+  </object>
+  <object class="GtkBox" id="task_info_page">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="orientation">vertical</property>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+    <child>
+      <placeholder/>
+    </child>
+  </object>
 </interface>

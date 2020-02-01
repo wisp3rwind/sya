@@ -8,7 +8,6 @@ import traceback
 
 from . import InvalidConfigurationError, Context
 from .borg import BorgError, DefaultHandlers, InvalidBorgOptions
-from .gui import main as gui_main
 from .util import LockInUse, truncate_path
 
 DEFAULT_CONFDIR = '/etc/borg-sya'
@@ -116,7 +115,8 @@ def exit(cx, *args, **kwargs):
 @main.command(help="Launch the GUI.")
 @click.pass_obj
 def gui(cx):
-    gui_main(cx)
+    from borg_sya import gui
+    gui.main(cx)
 
 
 @contextmanager
