@@ -14,12 +14,16 @@
         <property name="show_close_button">True</property>
         <child>
           <object class="GtkButton" id="back_button">
+            <property name="visible">False</property>
             <property name="label">gtk-go-back</property>
             <property name="can_focus">True</property>
             <property name="receives_default">True</property>
             <property name="use_stock">True</property>
             <signal name="clicked" handler="on_back_button_clicked" swapped="no"/>
           </object>
+          <packing>
+            <property name="pack_type">start</property>
+          </packing>
         </child>
         <child>
           <object class="GtkSeparator">
@@ -27,23 +31,19 @@
             <property name="can_focus">False</property>
           </object>
           <packing>
-            <property name="position">1</property>
+            <property name="pack_type">start</property>
           </packing>
         </child>
         <child>
           <object class="GtkStackSwitcher">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="halign">center</property>
             <property name="icon_size">3</property>
             <property name="stack">main_stack</property>
           </object>
           <packing>
-            <property name="position">2</property>
+            <property name="pack_type">start</property>
           </packing>
-        </child>
-        <child type="title">
-          <placeholder/>
         </child>
         <child>
           <object class="GtkButton" id="abort_all_button">
@@ -57,7 +57,6 @@
           </object>
           <packing>
             <property name="pack_type">end</property>
-            <property name="position">3</property>
           </packing>
         </child>
       </object>
@@ -65,9 +64,9 @@
     <child>
       <object class="GtkStack" id="main_stack">
         <property name="visible">True</property>
-        <!--<property name="name">Repositories</property>-->
+        <property name="name">Repositories</property>
         <!--<property name="width_request">600</property>-->
-        <!--<property name="height_request">400</property>-->
+        <property name="height_request">700</property>
         <child>
           <object class="RepoInfoPage" id="repos_page">
             <property name="visible">True</property>
@@ -77,193 +76,26 @@
           </packing>
         </child>
         <child>
-          <object class="GtkBox" id="tasks_page">
+          <object class="GtkStack" id="task_wrapper_stack">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <child>
-              <object class="GtkStackSidebar">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="stack">task_stack</property>
+              <object class="NoRepoFoundPage" id="no_repo_found_page">
               </object>
               <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">0</property>
+                <property name="name">no_repo_found_page</property>
               </packing>
             </child>
             <child>
-              <object class="GtkListBox">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <child>
-                  <object class="GtkListBoxRow">
-                    <property name="height_request">36</property>
-                    <property name="visible">True</property>
-                    <property name="can_focus">True</property>
-                    <child>
-                      <object class="GtkBox">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="halign">start</property>
-                        <property name="margin_left">4</property>
-                        <property name="margin_right">4</property>
-                        <child>
-                          <object class="GtkLabel">
-                            <property name="visible">True</property>
-                            <property name="can_focus">False</property>
-                            <property name="label" translatable="yes">Some task with a long name</property>
-                          </object>
-                          <packing>
-                            <property name="expand">False</property>
-                            <property name="fill">True</property>
-                            <property name="position">0</property>
-                          </packing>
-                        </child>
-                        <child>
-                          <object class="GtkSpinner">
-                            <property name="visible">True</property>
-                            <property name="can_focus">False</property>
-                            <property name="margin_left">4</property>
-                            <property name="active">True</property>
-                          </object>
-                          <packing>
-                            <property name="expand">False</property>
-                            <property name="fill">True</property>
-                            <property name="position">1</property>
-                          </packing>
-                        </child>
-                      </object>
-                    </child>
-                    <style>
-                      <class name="sidebar"/>
-                      <class name="sidebar-item"/>
-                      <class name="needs-attention"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkListBoxRow">
-                    <property name="height_request">36</property>
-                    <property name="visible">True</property>
-                    <property name="can_focus">True</property>
-                    <child>
-                      <object class="GtkBox">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="halign">start</property>
-                        <property name="margin_left">4</property>
-                        <property name="margin_right">4</property>
-                        <child>
-                          <object class="GtkImage">
-                            <property name="visible">True</property>
-                            <property name="can_focus">False</property>
-                            <property name="margin_right">4</property>
-                            <property name="stock">gtk-add</property>
-                            <property name="icon_size">1</property>
-                          </object>
-                          <packing>
-                            <property name="expand">False</property>
-                            <property name="fill">True</property>
-                            <property name="padding">5</property>
-                            <property name="position">0</property>
-                          </packing>
-                        </child>
-                        <child>
-                          <object class="GtkLabel">
-                            <property name="visible">True</property>
-                            <property name="can_focus">False</property>
-                            <property name="label" translatable="yes">New task</property>
-                          </object>
-                          <packing>
-                            <property name="expand">False</property>
-                            <property name="fill">True</property>
-                            <property name="position">1</property>
-                          </packing>
-                        </child>
-                      </object>
-                    </child>
-                    <style>
-                      <class name="sidebar"/>
-                      <class name="sidebar-item"/>
-                      <class name="needs-attention"/>
-                    </style>
-                  </object>
-                </child>
+              <object class="TaskInfoPage" id="task_info_page">
               </object>
               <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkStack" id="task_stack">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <child>
-                  <object class="GtkBox" id="add_task_page">
-                    <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="border_width">4</property>
-                    <property name="orientation">vertical</property>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">&lt;big&gt;&lt;b&gt;No repositories found&lt;/b&gt;&lt;/big&gt;</property>
-                        <property name="use_markup">True</property>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                        <property name="position">0</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkSeparator">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                        <property name="position">1</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Add a new repository to choose where to create your first backup!</property>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                        <property name="position">2</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <placeholder/>
-                    </child>
-                  </object>
-                  <packing>
-                    <property name="name">add_task_page</property>
-                    <property name="title" translatable="yes">Add task</property>
-                  </packing>
-                </child>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">2</property>
+                <property name="name">task_info_page</property>
               </packing>
             </child>
           </object>
           <packing>
-            <property name="name">tasks_page</property>
             <property name="title" translatable="yes">Tasks</property>
-            <property name="position">1</property>
           </packing>
         </child>
       </object>

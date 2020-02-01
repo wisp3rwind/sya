@@ -55,7 +55,7 @@ class RepoListRow(Gtk.ListBoxRow):
             self.repo_total_label.props.visible = False
             self.repo_usage_level.props.visible = False
         else:
-            self.repo_icon.props.icon_name = "folder"
+            self.repo_icon.props.icon_name = "drive-harddisk"
             self.repo_name_label.props.label = repo.name
             self.repo_loc_label.props.label = repo.path
             # TODO: Asynchronously get disk usage
@@ -66,6 +66,26 @@ class RepoListRow(Gtk.ListBoxRow):
             self.repo_usage_level.props.min_value = 0.0
             self.repo_usage_level.props.max_value = 1.0
             self.repo_usage_level.props.value = 0.42
+
+
+@Gtk.Template.from_resource("/com/example/Sya/task_list_row.ui")
+class TaskListRow(Gtk.ListBoxRow):
+    __gtype_name__ = "TaskListRow"
+
+    task_icon = Gtk.Template.Child()
+    task_name_label = Gtk.Template.Child()
+    repo_name_label = Gtk.Template.Child()
+
+    def __init__(self, task):
+        super().__init__()
+
+        if task == "add_new":
+            self.task_icon.props.icon_name = "list-add"
+            self.task_name_label.props.label = "Add new task"
+        else:
+            self.task_icon.props.icon_name = "gtk-ok"
+            self.task_name_label.props.label = task.name
+            self.repo_name_label.props.label = task.repo.name
 
 
 @Gtk.Template.from_resource("/com/example/Sya/repo_list.ui")
@@ -86,6 +106,7 @@ class RepoList(Gtk.Box):
         self.bind_property("title", self.list_title, "label",
                 BindingFlags.SYNC_CREATE | BindingFlags.BIDIRECTIONAL)
         self.hide()
+        self.i = 1
 
     @staticmethod
     def update_header(row, prev_row):
@@ -98,9 +119,53 @@ class RepoList(Gtk.Box):
         self.props.visible = flag
 
     def populate(self, repo):
-        self.repo_list_box.add(RepoListRow(repo))
+        row = RepoListRow(repo)
+        row.props.height_request = self.i * 50
+        self.i += 1
+        self.repo_list_box.add(row)
 
         self.hide(False)
+
+
+@Gtk.Template.from_resource("/com/example/Sya/task_list.ui")
+class TaskList(Gtk.Box):
+    __gtype_name__ = "TaskList"
+
+    title = GObject.Property(type=str, default="")
+    list_title = Gtk.Template.Child()
+    task_list_box = Gtk.Template.Child()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def setup(self):
+        # This cannot be done in __init__ because there, the PyGObject
+        # bindings have not yet retrieved the Template.Child()ren.
+        self.task_list_box.set_header_func(self.update_header)
+        self.bind_property("title", self.list_title, "label",
+                BindingFlags.SYNC_CREATE | BindingFlags.BIDIRECTIONAL)
+        self.hide()
+
+    @staticmethod
+    def update_header(row, prev_row):
+        if (prev_row and not row.get_header()):
+            row.set_header(Gtk.Separator(orientation="horizontal"))
+        else:
+            row.set_header(None)
+
+    def hide(self, flag=True):
+        # self.props.visible = not flag
+        pass
+
+    def populate(self, task):
+        self.task_list_box.add(TaskListRow(task))
+
+        self.hide(False)
+
+
+@Gtk.Template.from_resource("/com/example/Sya/task_info_page_no_repo.ui")
+class NoRepoFoundPage(Gtk.Box):
+    __gtype_name__ = "NoRepoFoundPage"
 
 
 @Gtk.Template.from_resource("/com/example/Sya/repo_info_page.ui")
@@ -124,6 +189,27 @@ class RepoInfoPage(Gtk.Box):
             self.local_repo_list.populate(repo)
 
 
+@Gtk.Template.from_resource("/com/example/Sya/task_info_page.ui")
+class TaskInfoPage(Gtk.Box):
+    __gtype_name__ = "TaskInfoPage"
+
+    scrolled_window = Gtk.Template.Child()
+    add_new_list = Gtk.Template.Child()
+    local_task_list = Gtk.Template.Child()
+    remote_task_list = Gtk.Template.Child()
+
+    def setup(self):
+        self.add_new_list.setup()
+        self.local_task_list.setup()
+        self.remote_task_list.setup()
+
+    def populate(self, cx):
+        self.add_new_list.populate("add_new")
+
+        for task in cx.tasks.values():
+            self.local_task_list.populate(task)
+
+
 def gui_main(cx):
     builder = Gtk.Builder()
     builder.add_from_resource("/com/example/Sya/main.ui")
@@ -132,8 +218,19 @@ def gui_main(cx):
     builder.connect_signals(Handlers())
 
     repos_page = builder.get_object("repos_page")
+    tasks_stack = builder.get_object("task_wrapper_stack")
+    tasks_page = builder.get_object("task_info_page")
+    no_repo_found_page = builder.get_object("no_repo_found_page")
+
     repos_page.setup()
     repos_page.populate(cx)
+
+    if len(cx.repos) > 0:
+        tasks_stack.set_visible_child(tasks_page)
+        tasks_page.setup()
+        tasks_page.populate(cx)
+    else:
+        tasks_stack.set_visible_child(no_repo_found_page)
 
     mainWindow = builder.get_object("mainWindow")
     mainWindow.show_all()
