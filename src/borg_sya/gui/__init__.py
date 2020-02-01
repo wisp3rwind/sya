@@ -12,6 +12,7 @@ BindingFlags = GObject.BindingFlags
 
 from ..core import *
 from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
+from .custom_expander import CustomExpander
 
 
 with importlib.resources.path("borg_sya.gui", "data") as data_dir:
