@@ -7,7 +7,8 @@ import sys
 import click
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gio
+from gi.repository import Gtk, Gio, GObject, GLib
+BindingFlags = GObject.BindingFlags
 
 from ..core import *
 from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
@@ -46,25 +47,45 @@ class RepoListRow(Gtk.ListBoxRow):
     def __init__(self, repo):
         super().__init__()
 
-        self.repo_icon.props.icon_name = "folder"
-        self.repo_name_label.props.label = repo.name
-        self.repo_loc_label.props.label = repo.path
-        # TODO: Asynchronously get disk usage
-        self.repo_avail_label.props.label = "Unknown"
-        self.repo_total_label.props.label = "Unknown"
-        # TODO: add offset values to GtkLevelBAr in order to change color
-        # depending on value
-        self.repo_usage_level.props.min_value = 0.0
-        self.repo_usage_level.props.max_value = 1.0
-        self.repo_usage_level.props.value = 0.42
+        if repo == "add_new":
+            self.repo_icon.props.icon_name = "list-add"
+            self.repo_name_label.props.label = "Add new repository"
+            self.repo_loc_label.props.visible = False
+            self.repo_avail_label.props.visible = False
+            self.repo_total_label.props.visible = False
+            self.repo_usage_level.props.visible = False
+        else:
+            self.repo_icon.props.icon_name = "folder"
+            self.repo_name_label.props.label = repo.name
+            self.repo_loc_label.props.label = repo.path
+            # TODO: Asynchronously get disk usage
+            self.repo_avail_label.props.label = "Unknown"
+            self.repo_total_label.props.label = "Unknown"
+            # TODO: add offset values to GtkLevelBAr in order to change color
+            # depending on value
+            self.repo_usage_level.props.min_value = 0.0
+            self.repo_usage_level.props.max_value = 1.0
+            self.repo_usage_level.props.value = 0.42
 
 
-# @Gtk.Template.from_resource("/com/example/Sya/repo_list.ui")
-class RepoListBox(Gtk.ListBox):
-    __gtype_name__ = "RepoListBox"
+@Gtk.Template.from_resource("/com/example/Sya/repo_list.ui")
+class RepoList(Gtk.Box):
+    __gtype_name__ = "RepoList"
 
-    def __init__(self, title, repos):
-        pass
+    title = GObject.Property(type=str, default="")
+    list_title = Gtk.Template.Child()
+    repo_list_box = Gtk.Template.Child()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def setup(self):
+        # This cannot be done in __init__ because there, the PyGObject
+        # bindings have not yet retrieved the Template.Child()ren.
+        self.repo_list_box.set_header_func(self.update_header)
+        self.bind_property("title", self.list_title, "label",
+                BindingFlags.SYNC_CREATE | BindingFlags.BIDIRECTIONAL)
+        self.hide()
 
     @staticmethod
     def update_header(row, prev_row):
@@ -72,6 +93,35 @@ class RepoListBox(Gtk.ListBox):
             row.set_header(Gtk.Separator(orientation="horizontal"))
         else:
             row.set_header(None)
+
+    def hide(self, flag=True):
+        self.props.visible = flag
+
+    def populate(self, repo):
+        self.repo_list_box.add(RepoListRow(repo))
+
+        self.hide(False)
+
+
+@Gtk.Template.from_resource("/com/example/Sya/repo_info_page.ui")
+class RepoInfoPage(Gtk.Box):
+    __gtype_name__ = "RepoInfoPage"
+
+    scrolled_window = Gtk.Template.Child()
+    add_new_list = Gtk.Template.Child()
+    local_repo_list = Gtk.Template.Child()
+    remote_repo_list = Gtk.Template.Child()
+
+    def setup(self):
+        self.add_new_list.setup()
+        self.local_repo_list.setup()
+        self.remote_repo_list.setup()
+
+    def populate(self, cx):
+        self.add_new_list.populate("add_new")
+
+        for repo in cx.repos.values():
+            self.local_repo_list.populate(repo)
 
 
 def gui_main(cx):
@@ -81,15 +131,9 @@ def gui_main(cx):
 
     builder.connect_signals(Handlers())
 
-    add_repo_page = builder.get_object("add_repo_page")
-    repo_info_page = builder.get_object("repo_info_page")
-    add_task_page = builder.get_object("add_task_page")
-    task_info_page = builder.get_object("task_info_page")
-
-    repo_list_box = builder.get_object("repo_list_box")
-    repo_list_box.set_header_func(RepoListBox.update_header)
-    for name, repo in cx.repos.items():
-        repo_list_box.add(RepoListRow(repo))
+    repos_page = builder.get_object("repos_page")
+    repos_page.setup()
+    repos_page.populate(cx)
 
     mainWindow = builder.get_object("mainWindow")
     mainWindow.show_all()
