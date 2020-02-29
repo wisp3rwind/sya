@@ -19,10 +19,16 @@
     <child>
       <object class="GtkGrid">
         <property name="orientation">horizontal</property>
+        <property name="column_spacing">16</property>
+        <property name="row_spacing">10</property>
+        <property name="halign">start</property>
+        <property name="margin_top">10</property>
+        <property name="margin_bottom">20</property>
+        <property name="margin_start">16</property>
         <child>
           <object class="GtkLabel">
             <property name="label">Name</property>
-            <property name="halign">end</property>
+            <property name="halign">start</property>
           </object>
           <packing>
             <property name="left_attach">0</property>
@@ -30,13 +36,45 @@
           </packing>
         </child>
         <child>
-          <object class="GtkEntry">
+          <object class="GtkEntry" id="name_entry">
             <property name="halign">start</property>
             <property name="hexpand">True</property>
           </object>
           <packing>
             <property name="left_attach">1</property>
             <property name="top_attach">0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Path</property>
+            <property name="halign">start</property>
+          </object>
+          <packing>
+            <property name="left_attach">0</property>
+            <property name="top_attach">1</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <child>
+              <object class="GtkEntry" id="path_entry">
+                <property name="halign">start</property>
+                <property name="hexpand">True</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkFileChooserButton" id="path_entry_button">
+                <property name="halign">start</property>
+                <property name="hexpand">True</property>
+                <property name="title"></property>
+                <property name="action">GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER</property>
+              </object>
+            </child>
+          </object>
+          <packing>
+            <property name="left_attach">1</property>
+            <property name="top_attach">1</property>
           </packing>
         </child>
       </object>
@@ -48,6 +86,60 @@
         <style>
           <class name="h2"/>
         </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">16</property>
+        <property name="halign">start</property>
+        <property name="margin_top">10</property>
+        <property name="margin_bottom">20</property>
+        <property name="margin_start">16</property>
+        <child>
+          <object class="GtkComboBoxText" id="comp_algorithm_combo">
+            <property name="halign">start</property>
+            <property name="hexpand">True</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkComboBoxText" id="comp_level_combo">
+            <property name="halign">start</property>
+            <property name="hexpand">True</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="auto_button">
+            <property name="halign">start</property>
+            <property name="hexpand">True</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Auto</property>
+            <property name="halign">start</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="halign">end</property>
+        <child>
+          <object class="GtkButton" id="discard_button">
+            <property name="halign">end</property>
+            <property name="label">Discard changes</property>
+            <property name="sensitive">False</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="apply_button">
+            <property name="halign">end</property>
+            <property name="label">Apply</property>
+            <property name="sensitive">False</property>
+          </object>
+        </child>
       </object>
     </child>
   </template>
