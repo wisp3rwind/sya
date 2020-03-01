@@ -1,0 +1,38 @@
+<interface>
+  <requires lib="gtk+" version="3.20"/>
+  <template class="CompressionChooser" parent="GtkBox">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">16</property>
+    <child>
+      <object class="GtkComboBoxText" id="algorithm_combo">
+        <property name="halign">start</property>
+        <property name="hexpand">True</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkComboBoxText" id="level_combo">
+        <property name="halign">start</property>
+        <property name="hexpand">True</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">4</property>
+        <child>
+          <object class="GtkCheckButton" id="auto_button">
+            <property name="halign">start</property>
+            <property name="hexpand">True</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Auto</property>
+            <property name="halign">start</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>
+

@@ -10,14 +10,19 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gio, GObject, GLib
 BindingFlags = GObject.BindingFlags
 
-from ..core import *
-from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
-from .custom_expander import CustomExpander
-
-
 with importlib.resources.path("borg_sya.gui", "data") as data_dir:
     gresources = Gio.resource_load(os.path.join(data_dir, "sya.gresource"))
     Gio.resources_register(gresources)
+
+from ..core import *
+from ..core.borg import BorgError, DefaultHandlers, InvalidBorgOptions
+from ..core.borg.defs import _COMPRESSION_ALGORITHMS
+from .custom_expander import CustomExpander
+from .compression_chooser import CompressionChooser
+
+# Ensure that the CompressionChooser gtype is registered before building the
+# UI below. Cf. https://stackoverflow.com/a/60128243/3451198
+CompressionChooser()
 
 
 class BorgHandlers(DefaultHandlers):
@@ -71,13 +76,23 @@ class RepoEntryTitle(Gtk.Grid):
 class RepoEntryDetail(Gtk.Box):
     __gtype_name__ = "RepoEntryDetail"
 
+    location_header = Gtk.Template.Child()
+    compression_header = Gtk.Template.Child()
+    compression_chooser = Gtk.Template.Child()
+    discard_button = Gtk.Template.Child()
+    apply_button = Gtk.Template.Child()
+
     def __init__(self, repo):
         super().__init__()
 
+        self.compression_chooser.set_specs(_COMPRESSION_ALGORITHMS)
         if repo == "add_new":
-            pass
+            self.compression_chooser.select_spec("none", None)
         else:
             pass
+
+    def setup(self):
+        pass
 
 
 @Gtk.Template.from_resource("/com/example/Sya/task_list_row.ui")
@@ -135,7 +150,9 @@ class RepoList(Gtk.Box):
         exp = CustomExpander()
         row.add(exp)
         exp.set_title(RepoEntryTitle(repo))
-        exp.add(RepoEntryDetail(repo))
+        detail = RepoEntryDetail(repo)
+        detail.setup()
+        exp.add(detail)
         self.repo_list_box.add(row)
 
         self.hide(False)

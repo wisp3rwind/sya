@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/com/example/Sya">
+    <file compressed="true" preprocess="xml-stripblanks">compression_chooser.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">main.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">repo_info_page.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">repo_list.ui</file>

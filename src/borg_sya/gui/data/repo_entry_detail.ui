@@ -8,7 +8,7 @@
     <property name="margin_top">6</property>
     <property name="margin_bottom">6</property>
     <child>
-      <object class="GtkLabel">
+      <object class="GtkLabel" id="location_header">
         <property name="label">Location</property>
         <property name="halign">start</property>
         <style>
@@ -80,7 +80,7 @@
       </object>
     </child>
     <child>
-      <object class="GtkLabel">
+      <object class="GtkLabel" id="compression_header">
         <property name="label">Compression</property>
         <property name="halign">start</property>
         <style>
@@ -89,37 +89,11 @@
       </object>
     </child>
     <child>
-      <object class="GtkBox">
-        <property name="orientation">horizontal</property>
-        <property name="spacing">16</property>
+      <object class="CompressionChooser" id="compression_chooser">
         <property name="halign">start</property>
         <property name="margin_top">10</property>
         <property name="margin_bottom">20</property>
         <property name="margin_start">16</property>
-        <child>
-          <object class="GtkComboBoxText" id="comp_algorithm_combo">
-            <property name="halign">start</property>
-            <property name="hexpand">True</property>
-          </object>
-        </child>
-        <child>
-          <object class="GtkComboBoxText" id="comp_level_combo">
-            <property name="halign">start</property>
-            <property name="hexpand">True</property>
-          </object>
-        </child>
-        <child>
-          <object class="GtkCheckButton" id="auto_button">
-            <property name="halign">start</property>
-            <property name="hexpand">True</property>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel">
-            <property name="label">Auto</property>
-            <property name="halign">start</property>
-          </object>
-        </child>
       </object>
     </child>
     <child>

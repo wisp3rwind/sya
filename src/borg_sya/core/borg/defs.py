@@ -168,3 +168,24 @@ _VERBOSITY_OPTIONS = {
     logging.INFO: '--verbose',
     logging.DEBUG: '--debug',
 }
+
+# <name>: [<min-level>, <max-level>, <default-level>]
+_COMPRESSION_ALGORITHMS = {
+        "none": None,
+        "lz4": None,
+        "zstd": [1, 22, 3],
+        # lzma supports levels 0-9, but according to borg-compression(1),
+        #
+        #     Giving level 0 (means "no compression", but still has zlib
+        #     protocol overhead) is usually pointless, you better use "none"
+        #     compression.
+        #
+        "zlib": [1, 9, 6],
+        # lzma supports levels 0-9, but according to borg-compression(1),
+        #
+        #     Giving levels above 6 is pointless and counter-productive
+        #     because it does not compress better due to the buffer size used
+        #     by borg [...]
+        #
+        "lzma": [0, 6, 6],
+}
